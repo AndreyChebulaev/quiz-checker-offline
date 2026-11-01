@@ -10,8 +10,10 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional
 
-DATABASE_NAME = "users.db"
-SESSION_LIFETIME = timedelta(hours=12)
+from config import DATABASE_PATH as DATABASE_NAME
+from config import SESSION_LIFETIME_HOURS
+
+SESSION_LIFETIME = timedelta(hours=SESSION_LIFETIME_HOURS)
 
 
 def _token_hash(token: str) -> str:

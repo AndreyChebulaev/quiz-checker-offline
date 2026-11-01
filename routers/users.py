@@ -1,124 +1,35 @@
-from fastapi import FastAPI, Request, Form, HTTPException, UploadFile, File
-from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, JSONResponse
+"""Управление пользователями (/v2). Доступно только администратору."""
+from io import BytesIO, StringIO
+
 import pandas as pd
-import sqlite3
-from io import StringIO, BytesIO
-from database import init_db, get_db_connection
-from models import UserUpdate
-from security import hash_password, generate_password
-from session_manager import remove_user_sessions, rename_user_sessions
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse, RedirectResponse
 
-app = FastAPI(title="User Registration System")
-
-# Инициализация базы данных
-init_db()
-
-def get_user_from_session(request: Request) -> str:
-    """Получает пользователя из сессии"""
-    session_token = request.cookies.get("session_token")
-    if session_token:
-        # Импортируем функцию из основного приложения для получения пользователя из сессии
-        try:
-            from session_manager import get_user_from_session as get_session_user
-            return get_session_user(session_token)
-        except ImportError:
-            # Если session_manager недоступен, возвращаем None
-            return None
-    return None
-
-def get_user_by_login(login: str):
-    """Получает пользователя из базы данных по логину"""
-    conn = sqlite3.connect('users.db')
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT id, user_type, last_name, first_name, middle_name, group_name, login, password, created_at 
-        FROM users WHERE login = ?
-    """, (login,))
-    user = cursor.fetchone()
-    conn.close()
-    
-    if user:
-        return {
-            "id": user[0],
-            "user_type": user[1],
-            "last_name": user[2],
-            "first_name": user[3],
-            "middle_name": user[4],
-            "group_name": user[5],
-            "login": user[6],
-            "password": user[7],  # хеш PBKDF2
-            "created_at": user[8]
-        }
-    return None
-
-def get_user_full_info(login: str):
-    """Получает полную информацию о пользователе для отображения"""
-    user = get_user_by_login(login)
-    if user:
-        # Формируем полное имя
-        full_name = f"{user['last_name']} {user['first_name']}"
-        if user['middle_name']:
-            full_name += f" {user['middle_name']}"
-        
-        return {
-            "login": user['login'],
-            "full_name": full_name,
-            "user_type": user['user_type'],
-            "group_name": user['group_name'],
-            "created_at": user['created_at']
-        }
-    return None
-
-def get_user_permissions(user_type: str):
-    """Возвращает доступные права пользователя"""
-    permissions = {
-        'can_view_tests': True,  # Все могут видеть тесты
-        'can_take_tests': True,  # Все могут проходить тесты
-        'can_upload_files': user_type in ['teacher', 'admin'],  # Только преподаватели и админы могут загружать файлы
-        'can_delete_files': user_type in ['teacher', 'admin'],  # Только преподаватели и админы могут удалять файлы
-        'can_manage_users': user_type == 'admin',  # Только админы могут управлять пользователями
-        'can_edit_tests': user_type in ['teacher', 'admin'],  # Только преподаватели и админы могут редактировать тесты
-    }
-    return permissions
-
-def get_template_context(request: Request):
-    """Возвращает контекст для шаблонов с информацией о пользователе"""
-    login = get_user_from_session(request)
-    if login:
-        user_info = get_user_full_info(login)
-        if user_info:
-            user_permissions = get_user_permissions(user_info['user_type'])
-            return {
-                "user_info": user_info,
-                "user_permissions": user_permissions
-            }
-    return {
-        "user_info": None,
-        "user_permissions": None
-    }
-
-# Настройка шаблонов и статических файлов
-templates = Jinja2Templates(directory="templates")
-
-ALLOWED_NEW_USER_TYPES = ("student", "teacher")
+from core.database import get_db_connection
+from core.security import generate_password, hash_password
+from core.sessions import remove_user_sessions, rename_user_sessions
+from core.users_repo import get_user_by_login
+from core.web import RedirectRequired, get_template_context, get_user_from_session, templates
+from services.user_management import UserUpdate, generate_login, save_user_to_db, user_exists
 
 
-@app.middleware("http")
-async def require_admin(request: Request, call_next):
-    """Весь раздел управления пользователями (/v2) доступен только администратору."""
-    if request.url.path.startswith("/static"):
-        return await call_next(request)
+def require_admin(request: Request) -> str:
+    """Зависимость: пропускает только администратора."""
     login = get_user_from_session(request)
     if not login:
-        return RedirectResponse(url="/", status_code=303)
+        raise RedirectRequired("/")
     user = get_user_by_login(login)
     if not user or user["user_type"] != "admin":
         if request.method == "GET":
-            return RedirectResponse(url="/select", status_code=303)
-        return JSONResponse({"detail": "Недостаточно прав"}, status_code=403)
-    return await call_next(request)
+            raise RedirectRequired("/select")
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    return login
+
+
+router = APIRouter(prefix="/v2", dependencies=[Depends(require_admin)])
+
+
+ALLOWED_NEW_USER_TYPES = ("student", "teacher")
 
 
 def render_credentials(request: Request, credentials: list, title: str):
@@ -126,122 +37,23 @@ def render_credentials(request: Request, credentials: list, title: str):
     context = get_template_context(request)
     context.update({"request": request, "credentials": credentials, "title": title})
     return templates.TemplateResponse("v2/credentials.html", context)
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
-def generate_login(last_name: str, first_name: str, middle_name: str = None) -> str:
-    """Генерация логина в формате фамилия+инициалы на английском"""
-    # Транслитерация кириллицы в латиницу
-    translit_map = {
-        'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e',
-        'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
-        'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
-        'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'shch',
-        'ы': 'y', 'э': 'e', 'ю': 'yu', 'я': 'ya',
-        'А': 'A', 'Б': 'B', 'В': 'V', 'Г': 'G', 'Д': 'D', 'Е': 'E', 'Ё': 'E',
-        'Ж': 'Zh', 'З': 'Z', 'И': 'I', 'Й': 'Y', 'К': 'K', 'Л': 'L', 'М': 'M',
-        'Н': 'N', 'О': 'O', 'П': 'P', 'Р': 'R', 'С': 'S', 'Т': 'T', 'У': 'U',
-        'Ф': 'F', 'Х': 'Kh', 'Ц': 'Ts', 'Ч': 'Ch', 'Ш': 'Sh', 'Щ': 'Shch',
-        'Ы': 'Y', 'Э': 'E', 'Ю': 'Yu', 'Я': 'Ya'
-    }
-    
-    def transliterate(text):
-        return ''.join(translit_map.get(char, char) for char in text.lower())
-    
-    # Транслитерация фамилии
-    last_name_en = transliterate(last_name)
-    
-    # Получение первой буквы имени
-    first_initial = transliterate(first_name[0]) if first_name else ''
-    
-    # Получение первой буквы отчества (если есть)
-    middle_initial = transliterate(middle_name[0]) if middle_name else ''
-    
-    login = f"{last_name_en}{first_initial}{middle_initial}"
-    
-    return login
 
-def user_exists(last_name: str, first_name: str, middle_name: str, user_type: str) -> bool:
-    """Проверяет, существует ли пользователь с такими ФИО и типом"""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT id FROM users 
-            WHERE last_name = ? AND first_name = ? AND middle_name = ? AND user_type = ?
-        ''', (
-            last_name,
-            first_name, 
-            middle_name or '',
-            user_type
-        ))
-        existing_user = cursor.fetchone()
-        return existing_user is not None
-
-def save_user_to_db(user_data: dict) -> dict:
-    """Сохранение пользователя в базу данных с обработкой дубликатов"""
-    # Проверяем, существует ли пользователь
-    if user_exists(
-        user_data['last_name'],
-        user_data['first_name'],
-        user_data.get('middle_name'),
-        user_data['user_type']
-    ):
-        return {"exists": True}
-    
-    login = user_data['login']
-    password = user_data['password']
-    
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        
-        # Проверка уникальности логина
-        cursor.execute("SELECT id FROM users WHERE login = ?", (login,))
-        existing_login = cursor.fetchone()
-        
-        # Если логин уже существует, добавляем число
-        counter = 1
-        original_login = login
-        while existing_login:
-            login = f"{original_login}{counter}"
-            cursor.execute("SELECT id FROM users WHERE login = ?", (login,))
-            existing_login = cursor.fetchone()
-            counter += 1
-        
-        # Сохранение пользователя в базу данных
-        cursor.execute('''
-            INSERT INTO users (user_type, last_name, first_name, middle_name, group_name, login, password)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            user_data['user_type'],
-            user_data['last_name'],
-            user_data['first_name'],
-            user_data.get('middle_name'),
-            user_data.get('group_name'),
-            login,
-            hash_password(password)
-        ))
-        conn.commit()
-        user_id = cursor.lastrowid
-        
-        return {
-            "id": user_id, 
-            "login": login, 
-            "password": password,
-            "exists": False
-        }
-
-@app.get("/")
+@router.get("/")
 async def home(request: Request):
     context = get_template_context(request)
     context["request"] = request
     return templates.TemplateResponse("v2/index.html", context)
 
-@app.get("/register")
+
+@router.get("/register")
 async def show_registration_form(request: Request):
     context = get_template_context(request)
     context["request"] = request
     return templates.TemplateResponse("v2/register.html", context)
 
-@app.post("/register")
+
+@router.post("/register")
 async def register_user(
     request: Request,
     user_type: str = Form(...),
@@ -291,13 +103,15 @@ async def register_user(
         "password": result["password"],
     }], "Пользователь создан")
 
-@app.get("/upload")
+
+@router.get("/upload")
 async def show_upload_form(request: Request):
     context = get_template_context(request)
     context["request"] = request
     return templates.TemplateResponse("v2/upload.html", context)
 
-@app.post("/upload")
+
+@router.post("/upload")
 async def upload_users_file(request: Request, file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(status_code=400, detail="Файл не выбран")
@@ -408,7 +222,8 @@ async def upload_users_file(request: Request, file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Ошибка обработки файла: {str(e)}")
 
-@app.get("/users")
+
+@router.get("/users")
 async def list_users(
     request: Request, 
     sort_by: str = "newest", 
@@ -474,7 +289,8 @@ async def list_users(
     
     return templates.TemplateResponse("v2/users_list.html", context)
 
-@app.get("/users/{user_id}/edit")
+
+@router.get("/users/{user_id}/edit")
 async def edit_user_form(request: Request, user_id: int):
     with get_db_connection() as conn:
         cursor = conn.cursor()
@@ -492,7 +308,8 @@ async def edit_user_form(request: Request, user_id: int):
     
     return templates.TemplateResponse("v2/edit_user.html", context)
 
-@app.post("/users/{user_id}/update")
+
+@router.post("/users/{user_id}/update")
 async def update_user(user_id: int, request: Request):
     form_data = await request.form()
     
@@ -550,7 +367,8 @@ async def update_user(user_id: int, request: Request):
 
     return RedirectResponse(url="/v2/users", status_code=303)
 
-@app.post("/users/{user_id}/regenerate_password")
+
+@router.post("/users/{user_id}/regenerate_password")
 async def regenerate_password(request: Request, user_id: int):
     new_password = generate_password()
 
@@ -573,7 +391,8 @@ async def regenerate_password(request: Request, user_id: int):
         "password": new_password,
     }], "Новый пароль сгенерирован")
 
-@app.post("/users/{user_id}/delete")
+
+@router.post("/users/{user_id}/delete")
 async def delete_user(request: Request, user_id: int):
     with get_db_connection() as conn:
         cursor = conn.cursor()
@@ -587,7 +406,3 @@ async def delete_user(request: Request, user_id: int):
 
     remove_user_sessions(user["login"])
     return RedirectResponse(url="/v2/users", status_code=303)
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
