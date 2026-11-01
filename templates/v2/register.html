@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block container_class %}register-container{% endblock %}
+
+{% block head_extra %}
+<style>
+    .container.register-container {
+        max-width: 780px;
+        margin: 2rem auto;
+    }
+
+    .form-actions .btn.btn-cancel {
+        background: linear-gradient(135deg, #c9822b, #ad6f22) !important;
+        color: #ffffff !important;
+        box-shadow: 0 2px 4px rgba(173, 111, 34, 0.35) !important;
+    }
+
+    .form-actions .btn.btn-cancel:hover {
+        background: linear-gradient(135deg, #ad6f22, #955d1b) !important;
+        box-shadow: 0 4px 8px rgba(149, 93, 27, 0.4) !important;
+        transform: translateY(-1px);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>Регистрация нового пользователя</h2>
+
+{% if error %}
+<div class="error-message">
+    {{ error }}
+</div>
+{% endif %}
+
+<form method="post" action="/v2/register" class="registration-form">
+    <div class="form-group">
+        <label for="user_type">Тип пользователя:</label>
+        <select id="user_type" name="user_type" required class="form-select">
+            <option value="">Выберите тип пользователя</option>
+            <option value="teacher">Преподаватель</option>
+            <option value="student">Студент</option>
+        </select>
+    </div>
+    
+    <div class="form-row">
+        <div class="form-group">
+            <label for="last_name">Фамилия:</label>
+            <input type="text" id="last_name" name="last_name" required class="form-input">
+        </div>
+        
+        <div class="form-group">
+            <label for="first_name">Имя:</label>
+            <input type="text" id="first_name" name="first_name" required class="form-input">
+        </div>
+        
+        <div class="form-group">
+            <label for="middle_name">Отчество:</label>
+            <input type="text" id="middle_name" name="middle_name" class="form-input">
+        </div>
+    </div>
+    
+    <div class="form-group" id="group-field" style="display: none;">
+        <label for="group_name">Группа:</label>
+        <input type="text" id="group_name" name="group_name" class="form-input">
+    </div>
+    
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Зарегистрировать</button>
+        <a href="/v2" class="btn btn-cancel">Отмена</a>
+    </div>
+</form>
+<script>
+document.getElementById('user_type').addEventListener('change', function() {
+    const groupField = document.getElementById('group-field');
+    if (this.value === 'student') {
+        groupField.style.display = 'block';
+        document.getElementById('group_name').required = true;
+    } else {
+        groupField.style.display = 'none';
+        document.getElementById('group_name').required = false;
+    }
+});
+</script>
+{% endblock %}

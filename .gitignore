@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Локальная ML-модель (~470 МБ, больше лимита GitHub).
+# Скачивается командой: python download_model.py
+local_models/
+
+# База данных (создаётся автоматически при первом запуске)
+users.db
+*.db-journal
+
+# Резервные копии
+_backup/
+
+# Секреты и настройки IDE / ИИ-ассистентов
+.env
+.env.*
+.continue/
+.vscode/
+.idea/
+
+# Временные файлы
+*.log
+*.tmp
+.tmp_*
+~$*.xlsx
+
+# Системные
+.DS_Store
+Thumbs.db
+desktop.ini

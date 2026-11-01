@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block container_class %}edit-user-container{% endblock %}
+
+{% block head_extra %}
+<style>
+    .container.edit-user-container {
+        max-width: 780px;
+        margin: 2rem auto;
+    }
+
+    .edit-form .btn.btn-cancel {
+        background: linear-gradient(135deg, #c9822b, #ad6f22) !important;
+        color: #ffffff !important;
+        box-shadow: 0 2px 4px rgba(173, 111, 34, 0.35) !important;
+    }
+
+    .edit-form .btn.btn-cancel:hover {
+        background: linear-gradient(135deg, #ad6f22, #955d1b) !important;
+        box-shadow: 0 4px 8px rgba(149, 93, 27, 0.4) !important;
+        transform: translateY(-1px);
+    }
+
+    .edit-form .password-field .btn.btn-primary {
+        background: linear-gradient(135deg, #3498db, #2980b9) !important;
+        color: #ffffff !important;
+        box-shadow: 0 2px 4px rgba(52, 152, 219, 0.3) !important;
+    }
+
+    .edit-form .password-field .btn.btn-primary:hover {
+        background: linear-gradient(135deg, #2980b9, #2573a7) !important;
+        box-shadow: 0 4px 8px rgba(52, 152, 219, 0.4) !important;
+        transform: translateY(-1px);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>Редактирование пользователя</h2>
+
+<form method="post" action="/v2/users/{{ user.id }}/update" class="edit-form">
+    <div class="form-row">
+        <div class="form-group">
+            <label for="last_name">Фамилия:</label>
+            <input type="text" id="last_name" name="last_name" value="{{ user.last_name }}" required class="form-input">
+        </div>
+        
+        <div class="form-group">
+            <label for="first_name">Имя:</label>
+            <input type="text" id="first_name" name="first_name" value="{{ user.first_name }}" required class="form-input">
+        </div>
+        
+        <div class="form-group">
+            <label for="middle_name">Отчество:</label>
+            <input type="text" id="middle_name" name="middle_name" value="{{ user.middle_name or '' }}" class="form-input">
+        </div>
+    </div>
+
+    {% if user.user_type == 'student' %}
+    <div class="form-group">
+        <label for="group_name">Группа:</label>
+        <input type="text" id="group_name" name="group_name" value="{{ user.group_name or '' }}" class="form-input">
+    </div>
+    {% endif %}
+
+    <div class="form-group">
+        <label for="login">Логин:</label>
+        <input type="text" id="login" name="login" value="{{ user.login }}" required class="form-input">
+    </div>
+
+    <div class="form-group">
+        <label for="password">Пароль:</label>
+        <div class="password-field">
+            <input type="password" id="password" name="password" value="{{ user.password }}" required class="form-input">
+            <button type="button" class="btn-password-toggle" onclick="togglePassword()">👁️</button>
+            <button type="button" class="btn btn-primary" onclick="regeneratePassword({{ user.id }})">Сгенерировать новый</button>
+        </div>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-save">Сохранить изменения</button>
+        <a href="/v2/users" class="btn btn-cancel">Отмена</a>
+    </div>
+</form>
+<script>
+function togglePassword() {
+    const passwordField = document.getElementById('password');
+    if (passwordField.type === 'password') {
+        passwordField.type = 'text';
+    } else {
+        passwordField.type = 'password';
+    }
+}
+
+function regeneratePassword(userId) {
+    if (confirm('Сгенерировать новый пароль? Старый пароль будет утерян.')) {
+        fetch(`/v2/users/${userId}/regenerate_password`, {
+            method: 'POST'
+        }).then(response => {
+            if (response.ok) {
+                location.reload();
+            }
+        });
+    }
+}
+</script>
+{% endblock %}

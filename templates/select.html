@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Quiz System - Select Test File{% endblock %}
+{% block container_class %}narrow-container tests-list-page{% endblock %}
+{% block content %}
+    <style>
+        .tests-list-page .users-list .user-item.limit-expired-item {
+            border-left-color: #e74c3c !important;
+            border-color: #f1b8b3 !important;
+            background: #fff6f6;
+        }
+
+        .tests-list-page .users-list .user-item.limit-expired-item .test-meta-chip {
+            background: #fdecec;
+            border-color: #f0c2be;
+            color: #8c2f28;
+        }
+
+        .tests-list-page .btn-unavailable-start {
+            background: linear-gradient(135deg, #95a5a6, #7f8c8d) !important;
+            cursor: pointer;
+        }
+
+        .tests-list-page .btn-unavailable-start:hover {
+            background: linear-gradient(135deg, #7f8c8d, #6c7a89) !important;
+        }
+    </style>
+
+    <div class="registration-form tests-list-form">
+        <div class="header">
+            <h1>Quiz System</h1>
+            <h3>Выберите тест для прохождения</h3>
+        </div>
+
+        {% if message %}
+        <div class="message success">
+            {{ message }}
+        </div>
+        {% endif %}
+
+        {% if error %}
+        <div class="message error">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <div class="message {% if ai_ready %}success{% else %}error{% endif %}">
+            {{ ai_help_text }}
+        </div>
+
+        <div class="users-section">
+            <h3>Список тестов ({{ files|length }})</h3>
+            <div class="users-list">
+                {% if files %}
+                    {% for file in files %}
+                    <div class="user-item{% if file.is_limit_expired %} limit-expired-item{% endif %}">
+                        <div class="user-info">
+                            <div class="user-name-actions">
+                                <div class="user-name">{{ file.name | replace('.xlsx', '') | replace('.xls', '') }}</div>
+                                <div class="test-meta-row">
+                                    {% if file.time_limit_minutes %}
+                                    <span class="test-meta-chip">
+                                        Лимит: {{ file.time_limit_minutes }} мин
+                                    </span>
+                                    {% endif %}
+                                    {% if file.max_attempts %}
+                                    <span class="test-meta-chip">
+                                        Попытки: {{ file.attempts_used }} из {{ file.max_attempts }}
+                                    </span>
+                                    {% endif %}
+                                    {% if file.available_until_display %}
+                                    <span class="test-meta-chip">
+                                        Дедлайн: {{ file.available_until_display }}
+                                    </span>
+                                    {% endif %}
+                                </div>
+                                {% if not file.is_available and not file.is_limit_expired %}
+                                <div class="test-meta-warning">
+                                    {{ file.unavailable_reason }}
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="user-actions">
+                            <form action="/select" method="post" style="display: inline;">
+                                <input type="hidden" name="filename" value="{{ file.name }}">
+                                {% if file.is_available %}
+                                <button type="submit" class="btn btn-primary">
+                                    Начать тест
+                                </button>
+                                {% else %}
+                                <button
+                                    type="button"
+                                    class="btn btn-primary btn-unavailable-start"
+                                    data-reason="{{ file.unavailable_reason | e }}"
+                                    onclick="showUnavailableReason(this)"
+                                >
+                                    Начать тест
+                                </button>
+                                {% endif %}
+                            </form>
+
+                            {% if user_permissions.can_delete_files %}
+                            <button type="button" onclick='editFile({{ file.name | tojson }})' class="btn btn-edit">Изменить</button>
+                            {% endif %}
+                            {% if user_permissions.can_delete_files %}
+                            <button type="button" onclick='deleteFile({{ file.name | tojson }})' class="btn btn-delete">Удалить</button>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="no-users">
+                        <h3>Нет доступных тестов</h3>
+                        <p>Обратитесь к администратору для загрузки тестов</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function editFile(filename) {
+            window.location.href = `/main2/edit/${encodeURIComponent(filename)}`;
+        }
+
+        function showUnavailableReason(button) {
+            const reason = (button && button.dataset && button.dataset.reason)
+                ? button.dataset.reason
+                : 'Этот тест недоступен.';
+            alert(`Тест больше пройти нельзя: ${reason}`);
+        }
+
+        async function deleteFile(filename) {
+            if (confirm(`Удалить файл ${filename}?`)) {
+                const formData = new FormData();
+                formData.append('filename', filename);
+
+                const response = await fetch('/delete_file', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                alert(result.message);
+
+                if (result.status === 'success') {
+                    location.reload();
+                }
+            }
+        }
+    </script>
+{% endblock %}
