@@ -94,53 +94,32 @@ def normalize_excel_filename(filename: str) -> str:
     return safe_filename
 
 
+NEW_TEST_PLACEHOLDER = "new_file.xlsx"  # служебное имя для страницы создания теста
+_FORBIDDEN_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+
+
+def make_test_filename(test_name: str) -> str:
+    """Имя файла .xlsx из названия теста, введённого преподавателем."""
+    name = _FORBIDDEN_FILENAME_CHARS.sub(" ", test_name or "")
+    name = re.sub(r"\s+", " ", name).strip(" .")
+    if name.lower().endswith(".xlsx"):
+        name = name[:-5].strip(" .")
+    if not name:
+        raise ValueError("Укажите название теста")
+    if len(name) > 100:
+        raise ValueError("Название теста слишком длинное (максимум 100 символов)")
+    filename = f"{name}.xlsx"
+    if filename == NEW_TEST_PLACEHOLDER:
+        raise ValueError("Это название зарезервировано, выберите другое")
+    return filename
+
+
 def get_imported_file_path(filename: str) -> Path:
     return Path(IMPORTED_FILES_DIR) / normalize_excel_filename(filename)
 
 
 def get_saved_file_path(filename: str) -> Path:
     return Path(UPLOAD_DIR) / normalize_excel_filename(filename)
-
-
-def parse_answers_string(answers_str: str) -> list:
-    """Парсит строку с ответами в кавычках"""
-    # Убираем лишние пробелы
-    answers_str = answers_str.strip()
-    
-    # Если строка уже похожа на список Python
-    if answers_str.startswith('[') and answers_str.endswith(']'):
-        try:
-            return ast.literal_eval(answers_str)
-        except:
-            pass
-    
-    # Разбиваем по кавычкам
-    answers = []
-    in_quote = False
-    current_answer = ""
-    
-    for char in answers_str:
-        if char == '"':
-            if in_quote:
-                # Закрывающая кавычка
-                if current_answer:
-                    answers.append(current_answer)
-                current_answer = ""
-            in_quote = not in_quote
-        elif char == ',' and not in_quote:
-            # Запятая вне кавычек - разделитель
-            if current_answer:
-                answers.append(current_answer.strip())
-                current_answer = ""
-        else:
-            if in_quote or char not in [' ', '\t', '\n']:
-                current_answer += char
-    
-    # Добавляем последний ответ
-    if current_answer.strip():
-        answers.append(current_answer.strip())
-    
-    return answers
 
 
 def parse_answers(answers_str):
@@ -162,27 +141,6 @@ def parse_answers(answers_str):
         # Если парсинг не удался, возвращаем как есть (убирая лишние кавычки)
         clean_str = str(answers_str).strip().strip('"')
         return [clean_str]
-
-
-def format_answers(answers_list):
-    """Форматирует список ответов в строку с кавычками"""
-    if not answers_list:
-        return ""
-    
-    # Фильтруем пустые ответы и убираем существующие кавычки
-    clean_answers = []
-    for answer in answers_list:
-        if answer and str(answer).strip():
-            clean_answer = str(answer).strip().strip('"')
-            if clean_answer:  # Проверяем, не пустая ли строка после очистки
-                clean_answers.append(clean_answer)
-    
-    if not clean_answers:
-        return ""
-    
-    # Форматируем с кавычками
-    formatted = ','.join([f'"{answer}"' for answer in clean_answers])
-    return formatted
 
 
 def process_excel_file(file_path):
@@ -216,15 +174,3 @@ def save_excel_file(file_path, data):
     wb.close()
 
 
-def create_new_excel_file(file_path, data):
-    """Создает новый Excel файл с данными БЕЗ заголовков"""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Вопросы и ответы"
-    
-    # Добавляем данные БЕЗ заголовков - сразу вопросы и ответы
-    for row in data:
-        ws.append([row["question"], row["answers"]])
-    
-    wb.save(file_path)
-    wb.close()

@@ -256,9 +256,19 @@
     </div>
 </div>
 
-<form action="/editor/save" method="post" id="main-form" class="{% if filename == 'new_file.xlsx' %}create-test-form{% endif %}">
+<form action="/editor/save_edit" method="post" id="main-form" class="{% if filename == 'new_file.xlsx' %}create-test-form{% endif %}">
     <input type="hidden" name="filename" value="{{ filename }}">
     <input type="hidden" name="original_data" value="{{ original_data }}">
+
+    {% if filename == "new_file.xlsx" %}
+    <div class="settings-block">
+        <div class="form-group">
+            <label for="test_name">Название теста:</label>
+            <input type="text" id="test_name" maxlength="100" required
+                   placeholder="Например: Основы машинного обучения">
+        </div>
+    </div>
+    {% endif %}
 
     <div class="settings-block">
         <div class="question-header">
@@ -611,6 +621,10 @@ document.getElementById('main-form').addEventListener('submit', function(e) {
     const formData = new FormData();
     formData.append('filename', document.querySelector('input[name="filename"]').value);
     formData.append('original_data', document.querySelector('input[name="original_data"]').value);
+    const testNameInput = document.getElementById('test_name');
+    if (testNameInput) {
+        formData.append('test_name', testNameInput.value.trim());
+    }
     formData.append('time_limit_minutes', document.getElementById('time_limit_minutes').value.trim());
     formData.append('max_attempts', document.getElementById('max_attempts').value.trim());
     formData.append('available_until', document.getElementById('available_until').value);

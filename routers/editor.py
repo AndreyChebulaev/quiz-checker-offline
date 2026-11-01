@@ -3,15 +3,15 @@ import json
 
 import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from core.users_repo import get_user_full_info, get_user_permissions
 from core.web import get_user_from_session, templates
 from services.test_files import (
-    create_new_excel_file,
-    format_answers,
+    NEW_TEST_PLACEHOLDER,
     get_imported_file_path,
     get_saved_file_path,
+    make_test_filename,
     normalize_excel_filename,
     parse_answers,
     process_excel_file,
@@ -106,96 +106,6 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
     
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Ошибка обработки файла: {str(e)}")
-
-
-@router.post("/save")
-async def save_file(
-    request: Request,
-    filename: str = Form(...),
-    original_data: str = Form("[]"),
-    questions: list[str] = Form(...),
-    answers: list[str] = Form(...)
-):
-    # Проверяем авторизацию
-    user_login = get_user_from_session(request)
-    if not user_login:
-        raise HTTPException(status_code=401, detail="Требуется авторизация")
-    
-    # Проверяем права доступа
-    user_info = get_user_full_info(user_login)
-    user_permissions = get_user_permissions(user_info['user_type'])
-    
-    if not user_permissions['can_edit_tests']:
-        raise HTTPException(status_code=403, detail="У вас нет прав для редактирования тестов")
-    
-    try:
-        # Определяем, это новый файл или редактирование существующего
-        is_new_file = filename == "new_file.xlsx" or not original_data or original_data == "[]"
-        
-        if is_new_file:
-            # СОЗДАНИЕ НОВОГО ФАЙЛА - БЕЗ ЗАГОЛОВКОВ
-            output_filename = "new_questions.xlsx"
-            output_path = f"uploaded_files/{output_filename}"
-            
-            # Подготавливаем данные для нового файла
-            new_data = []
-            for i in range(len(questions)):
-                question_text = questions[i]
-                # Парсим ответы из формы и правильно форматируем
-                answers_list = [answer.strip() for answer in answers[i].split('","') if answer.strip()]
-                # Убираем лишние кавычки
-                clean_answers = [answer.strip('"') for answer in answers_list if answer.strip('"')]
-                formatted_answers = format_answers(clean_answers)
-                
-                new_data.append({
-                    "question": question_text,
-                    "answers": formatted_answers
-                })
-            
-            # Создаем новый файл БЕЗ заголовков
-            create_new_excel_file(output_path, new_data)
-            
-            # Подготавливаем данные для отображения
-            display_data = []
-            for item in new_data:
-                display_data.append({
-                    "Question": item["question"],
-                    "Answers": item["answers"]
-                })
-            
-        else:
-            # РЕДАКТИРОВАНИЕ СУЩЕСТВУЮЩЕГО ФАЙЛА
-            # Полностью заменяем содержимое файла с тем же именем
-            output_filename = filename
-            output_path = f"uploaded_files/{output_filename}"
-            
-            # Создаем новые данные
-            new_data = []
-            for i in range(len(questions)):
-                question_text = questions[i]
-                # Парсим ответы из формы и правильно форматируем
-                answers_list = [answer.strip() for answer in answers[i].split('","') if answer.strip()]
-                # Убираем лишние кавычки
-                clean_answers = [answer.strip('"') for answer in answers_list if answer.strip('"')]
-                formatted_answers = format_answers(clean_answers)
-                
-                new_data.append([question_text, formatted_answers])
-            
-            # Сохраняем полностью новый файл (не копируем старый)
-            save_excel_file(output_path, new_data)
-            
-            # Подготавливаем данные для отображения
-            display_data = []
-            for row in new_data:
-                display_data.append({
-                    "Question": row[0] if len(row) > 0 else "",
-                    "Answers": row[1] if len(row) > 1 else ""
-                })
-        
-        return RedirectResponse(url="/select", status_code=303)
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка сохранения: {str(e)}")
 
 
 @router.get("/download/{filename}")
@@ -349,7 +259,8 @@ async def save_edit(
     max_attempts: str = Form(""),
     available_until: str = Form(""),
     allowed_students: str = Form(""),
-    allowed_groups: str = Form("")
+    allowed_groups: str = Form(""),
+    test_name: str = Form("")
 ):
     user_login = get_user_from_session(request)
     if not user_login:
@@ -384,8 +295,22 @@ async def save_edit(
         
         data.append([question, answers_str])
     
-    # Сохраняем в Excel файл в правильной директории
-    safe_filename = normalize_excel_filename(filename)
+    # Новый тест сохраняется под названием, которое ввёл преподаватель.
+    # Раньше все новые тесты записывались в new_file.xlsx и затирали друг друга.
+    if filename == NEW_TEST_PLACEHOLDER:
+        try:
+            safe_filename = make_test_filename(test_name)
+        except ValueError as e:
+            return JSONResponse(content={"error": str(e)}, status_code=400)
+        if get_saved_file_path(safe_filename).exists():
+            return JSONResponse(
+                content={"error": f"Тест «{safe_filename}» уже существует. Выберите другое название."},
+                status_code=409
+            )
+    else:
+        safe_filename = normalize_excel_filename(filename)
+        if not get_saved_file_path(safe_filename).exists():
+            return JSONResponse(content={"error": "Редактируемый тест не найден"}, status_code=404)
     file_path = get_saved_file_path(safe_filename)
 
     try:
@@ -397,13 +322,9 @@ async def save_edit(
         return JSONResponse(
             content={
                 "success": True,
-                "message": f"Файл {filename} успешно сохранен",
+                "message": f"Тест «{safe_filename}» сохранён",
                 "filename": safe_filename
             }
         )
     except Exception as e:
-        import traceback
-        return JSONResponse(
-            content={"error": f"Ошибка сохранения: {str(e)}\n{traceback.format_exc()}"},
-            status_code=500
-        )
+        return JSONResponse(content={"error": f"Ошибка сохранения: {e}"}, status_code=500)
