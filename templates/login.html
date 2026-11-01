@@ -81,22 +81,17 @@
         <form action="/login" method="post">
             <div class="form-group">
                 <label for="username">Логин:</label>
-                <input type="text" value="admin" id="username" name="username" required autofocus>
+                <input type="text" id="username" name="username" autocomplete="username" required autofocus>
             </div>
             
             <div class="form-group">
                 <label for="password">Пароль:</label>
-                <input type="password" value="admin123" id="password" name="password" required>
+                <input type="password" id="password" name="password" autocomplete="current-password" required>
             </div>
             
             <button type="submit" class="btn">Войти</button>
         </form>
         
-        <div class="demo-info">
-            <strong>Тестовый доступ:</strong><br>
-            Логин: <code>admin</code><br>
-            Пароль: <code>admin123</code>
-        </div>
     </div>
 </body>
 </html>

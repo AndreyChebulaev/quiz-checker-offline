@@ -1,29 +1,19 @@
 from fastapi import FastAPI, Request, Form, HTTPException, UploadFile, File
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
-import random
-import string
+from fastapi.responses import RedirectResponse, JSONResponse
 import pandas as pd
 import sqlite3
-from io import StringIO
+from io import StringIO, BytesIO
 from database import init_db, get_db_connection
 from models import UserUpdate
-import hashlib
+from security import hash_password, generate_password
+from session_manager import remove_user_sessions, rename_user_sessions
 
 app = FastAPI(title="User Registration System")
 
 # Инициализация базы данных
 init_db()
-
-def hash_password(password: str) -> str:
-    """Хеширует пароль с использованием SHA-256 и соли"""
-    salt = "quiz_system_salt"  # В реальном приложении используйте уникальную соль для каждого пользователя
-    return hashlib.sha256((password + salt).encode()).hexdigest()
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Проверяет пароль"""
-    return hash_password(plain_password) == hashed_password
 
 def get_user_from_session(request: Request) -> str:
     """Получает пользователя из сессии"""
@@ -58,7 +48,7 @@ def get_user_by_login(login: str):
             "middle_name": user[4],
             "group_name": user[5],
             "login": user[6],
-            "password": user[7],  # Внимание: хранится в открытом виде!
+            "password": user[7],  # хеш PBKDF2
             "created_at": user[8]
         }
     return None
@@ -111,6 +101,31 @@ def get_template_context(request: Request):
 
 # Настройка шаблонов и статических файлов
 templates = Jinja2Templates(directory="templates")
+
+ALLOWED_NEW_USER_TYPES = ("student", "teacher")
+
+
+@app.middleware("http")
+async def require_admin(request: Request, call_next):
+    """Весь раздел управления пользователями (/v2) доступен только администратору."""
+    if request.url.path.startswith("/static"):
+        return await call_next(request)
+    login = get_user_from_session(request)
+    if not login:
+        return RedirectResponse(url="/", status_code=303)
+    user = get_user_by_login(login)
+    if not user or user["user_type"] != "admin":
+        if request.method == "GET":
+            return RedirectResponse(url="/select", status_code=303)
+        return JSONResponse({"detail": "Недостаточно прав"}, status_code=403)
+    return await call_next(request)
+
+
+def render_credentials(request: Request, credentials: list, title: str):
+    """Показывает логины и пароли один раз: в БД хранятся только хеши."""
+    context = get_template_context(request)
+    context.update({"request": request, "credentials": credentials, "title": title})
+    return templates.TemplateResponse("v2/credentials.html", context)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 def generate_login(last_name: str, first_name: str, middle_name: str = None) -> str:
@@ -144,11 +159,6 @@ def generate_login(last_name: str, first_name: str, middle_name: str = None) -> 
     login = f"{last_name_en}{first_initial}{middle_initial}"
     
     return login
-
-def generate_password(length: int = 8) -> str:
-    """Генерация случайного пароля"""
-    characters = string.ascii_letters + string.digits
-    return ''.join(random.choice(characters) for _ in range(length))
 
 def user_exists(last_name: str, first_name: str, middle_name: str, user_type: str) -> bool:
     """Проверяет, существует ли пользователь с такими ФИО и типом"""
@@ -207,7 +217,7 @@ def save_user_to_db(user_data: dict) -> dict:
             user_data.get('middle_name'),
             user_data.get('group_name'),
             login,
-            password
+            hash_password(password)
         ))
         conn.commit()
         user_id = cursor.lastrowid
@@ -240,6 +250,14 @@ async def register_user(
     middle_name: str = Form(None),
     group_name: str = Form(None)
 ):
+    if user_type not in ALLOWED_NEW_USER_TYPES:
+        context = get_template_context(request)
+        context.update({"request": request, "error": "Недопустимый тип пользователя"})
+        return templates.TemplateResponse("v2/register.html", context)
+    last_name, first_name = last_name.strip(), first_name.strip()
+    middle_name = (middle_name or "").strip() or None
+    group_name = (group_name or "").strip() or None
+
     # Генерация логина и пароля
     login = generate_login(last_name, first_name, middle_name)
     password = generate_password()
@@ -265,8 +283,13 @@ async def register_user(
     
     # Сохраняем пользователя
     result = save_user_to_db(user_data)
-    
-    return RedirectResponse(url="/users", status_code=303)
+
+    return render_credentials(request, [{
+        "full_name": f"{last_name} {first_name} {middle_name or ''}".strip(),
+        "group_name": group_name or "",
+        "login": result["login"],
+        "password": result["password"],
+    }], "Пользователь создан")
 
 @app.get("/upload")
 async def show_upload_form(request: Request):
@@ -292,7 +315,7 @@ async def upload_users_file(request: Request, file: UploadFile = File(...)):
             df = pd.read_csv(StringIO(csv_content))
         else:
             # Обработка Excel файла
-            df = pd.read_excel(content)
+            df = pd.read_excel(BytesIO(content))
         
         # Проверяем необходимые колонки
         required_columns = ['last_name', 'first_name', 'user_type']
@@ -308,7 +331,8 @@ async def upload_users_file(request: Request, file: UploadFile = File(...)):
             'failed': 0,
             'exists': 0,
             'errors': [],
-            'existing_users': []
+            'existing_users': [],
+            'credentials': []
         }
         
         # Обрабатываем каждую строку
@@ -361,6 +385,12 @@ async def upload_users_file(request: Request, file: UploadFile = File(...)):
                 
                 if not result.get('exists'):
                     results['successful'] += 1
+                    results['credentials'].append({
+                        "full_name": f"{user_data['last_name']} {user_data['first_name']} {user_data['middle_name'] or ''}".strip(),
+                        "group_name": user_data['group_name'] or "",
+                        "login": result["login"],
+                        "password": result["password"],
+                    })
                 
             except Exception as e:
                 results['failed'] += 1
@@ -466,58 +496,97 @@ async def edit_user_form(request: Request, user_id: int):
 async def update_user(user_id: int, request: Request):
     form_data = await request.form()
     
+    def clean(name):
+        value = form_data.get(name)
+        return value.strip() if isinstance(value, str) else value
+
+    new_password = clean("password") or None  # пусто — пароль не меняется
     update_data = UserUpdate(
-        last_name=form_data.get("last_name"),
-        first_name=form_data.get("first_name"),
-        middle_name=form_data.get("middle_name"),
-        group_name=form_data.get("group_name"),
-        login=form_data.get("login"),
-        password=form_data.get("password")
+        last_name=clean("last_name") or None,
+        first_name=clean("first_name") or None,
+        middle_name=clean("middle_name"),
+        group_name=clean("group_name"),
+        login=clean("login") or None,
+        password=hash_password(new_password) if new_password else None
     )
-    
-    # Подготовка данных для обновления
-    update_fields = []
-    update_values = []
-    
-    for field, value in update_data.dict().items():
-        if value is not None:
-            update_fields.append(f"{field} = ?")
-            update_values.append(value)
-    
-    if update_fields:
-        update_values.append(user_id)
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        current = cursor.execute("SELECT login FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not current:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        old_login = current["login"]
+
+        if update_data.login and update_data.login != old_login:
+            taken = cursor.execute(
+                "SELECT id FROM users WHERE login = ? AND id != ?", (update_data.login, user_id)
+            ).fetchone()
+            if taken:
+                user = dict(cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
+                context = get_template_context(request)
+                context.update({"request": request, "user": user,
+                                "error": f"Логин «{update_data.login}» уже занят"})
+                return templates.TemplateResponse("v2/edit_user.html", context)
+
+        update_fields = []
+        update_values = []
+        for field, value in update_data.model_dump().items():
+            if value is not None:
+                update_fields.append(f"{field} = ?")
+                update_values.append(value or None)
+
+        if update_fields:
+            update_values.append(user_id)
             cursor.execute(
                 f"UPDATE users SET {', '.join(update_fields)} WHERE id = ?",
                 update_values
             )
             conn.commit()
-    
-    return RedirectResponse(url="/users", status_code=303)
+
+    if update_data.password:
+        remove_user_sessions(old_login)  # после смены пароля нужно войти заново
+    elif update_data.login and update_data.login != old_login:
+        rename_user_sessions(old_login, update_data.login)
+
+    return RedirectResponse(url="/v2/users", status_code=303)
 
 @app.post("/users/{user_id}/regenerate_password")
-async def regenerate_password(user_id: int):
+async def regenerate_password(request: Request, user_id: int):
     new_password = generate_password()
-    
+
     with get_db_connection() as conn:
         cursor = conn.cursor()
+        user = cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
         cursor.execute(
             "UPDATE users SET password = ? WHERE id = ?",
-            (new_password, user_id)
+            (hash_password(new_password), user_id)
         )
         conn.commit()
-    
-    return RedirectResponse(url=f"/users/{user_id}/edit", status_code=303)
+
+    remove_user_sessions(user["login"])
+    return render_credentials(request, [{
+        "full_name": " ".join(filter(None, [user["last_name"], user["first_name"], user["middle_name"]])),
+        "group_name": user["group_name"] or "",
+        "login": user["login"],
+        "password": new_password,
+    }], "Новый пароль сгенерирован")
 
 @app.post("/users/{user_id}/delete")
-async def delete_user(user_id: int):
+async def delete_user(request: Request, user_id: int):
     with get_db_connection() as conn:
         cursor = conn.cursor()
+        user = cursor.execute("SELECT login FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        if user["login"] == get_user_from_session(request):
+            return JSONResponse({"detail": "Нельзя удалить самого себя"}, status_code=400)
         cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
-    
-    return RedirectResponse(url="/users", status_code=303)
+
+    remove_user_sessions(user["login"])
+    return RedirectResponse(url="/v2/users", status_code=303)
 
 if __name__ == "__main__":
     import uvicorn

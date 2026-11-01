@@ -38,6 +38,11 @@
 {% block content %}
 <h2>Редактирование пользователя</h2>
 
+{% if error %}<div class="error-message">{{ error }}</div>{% endif %}
+
+<form method="post" action="/v2/users/{{ user.id }}/regenerate_password" id="regenerate-form"
+      onsubmit="return confirm('Сгенерировать новый пароль? Старый перестанет работать.')"></form>
+
 <form method="post" action="/v2/users/{{ user.id }}/update" class="edit-form">
     <div class="form-row">
         <div class="form-group">
@@ -69,11 +74,12 @@
     </div>
 
     <div class="form-group">
-        <label for="password">Пароль:</label>
+        <label for="password">Новый пароль:</label>
         <div class="password-field">
-            <input type="password" id="password" name="password" value="{{ user.password }}" required class="form-input">
+            <input type="password" id="password" name="password" value="" autocomplete="new-password"
+                   placeholder="Оставьте пустым, чтобы не менять" class="form-input">
             <button type="button" class="btn-password-toggle" onclick="togglePassword()">👁️</button>
-            <button type="button" class="btn btn-primary" onclick="regeneratePassword({{ user.id }})">Сгенерировать новый</button>
+            <button type="submit" form="regenerate-form" class="btn btn-primary">Сгенерировать новый</button>
         </div>
     </div>
 
@@ -92,16 +98,5 @@ function togglePassword() {
     }
 }
 
-function regeneratePassword(userId) {
-    if (confirm('Сгенерировать новый пароль? Старый пароль будет утерян.')) {
-        fetch(`/v2/users/${userId}/regenerate_password`, {
-            method: 'POST'
-        }).then(response => {
-            if (response.ok) {
-                location.reload();
-            }
-        });
-    }
-}
 </script>
 {% endblock %}

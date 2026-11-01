@@ -9,8 +9,9 @@ import re
 from typing import List, Dict, Optional, Any
 import glob
 import sqlite3
-import hashlib
 import json
+import secrets
+import time
 from io import BytesIO
 
 from datetime import datetime, timedelta
@@ -18,6 +19,14 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from ai_backend import LocalAIService, build_local_ai_help_text
+from security import hash_password, verify_password, generate_password
+from session_manager import (
+    create_session,
+    remove_session,
+    remove_user_sessions,
+    get_user_from_session as get_session_user,
+    SESSION_LIFETIME,
+)
 import editor
 from users import app as users_app
 
@@ -112,22 +121,49 @@ def get_uploaded_file_path(filename: str) -> str:
 
 
 
-def hash_password(password: str) -> str:
-    """Хеширует пароль с использованием SHA-256 и соли"""
-    salt = "quiz_system_salt"  # В реальном приложении используйте уникальную соль для каждого пользователя
-    return hashlib.sha256((password + salt).encode()).hexdigest()
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Проверяет пароль"""
-    return hash_password(plain_password) == hashed_password
-
 def get_user_from_session(request: Request) -> Optional[str]:
     """Получает пользователя из сессии"""
-    session_token = request.cookies.get("session_token")
-    if session_token:
-        from session_manager import get_user_from_session as get_session_user
-        return get_session_user(session_token)
-    return None
+    return get_session_user(request.cookies.get("session_token"))
+
+
+# Защита от перебора паролей: не более MAX_LOGIN_FAILURES неудачных
+# попыток на один логин за LOGIN_LOCK_SECONDS секунд.
+MAX_LOGIN_FAILURES = 5
+LOGIN_LOCK_SECONDS = 5 * 60
+_login_failures: Dict[str, List[float]] = {}
+
+
+def _recent_failures(login: str) -> List[float]:
+    now = time.time()
+    attempts = [t for t in _login_failures.get(login, []) if now - t < LOGIN_LOCK_SECONDS]
+    _login_failures[login] = attempts
+    return attempts
+
+
+def ensure_admin_exists(cursor) -> None:
+    """Создаёт первого администратора, если в системе нет ни одного.
+
+    Пароль берётся из переменной окружения QUIZ_ADMIN_PASSWORD, иначе
+    генерируется случайно и записывается в first_admin_credentials.txt.
+    """
+    cursor.execute("SELECT COUNT(*) FROM users WHERE user_type = 'admin'")
+    if cursor.fetchone()[0] > 0:
+        return
+
+    password = os.getenv("QUIZ_ADMIN_PASSWORD") or generate_password(12)
+    login = "admin"
+    cursor.execute("SELECT COUNT(*) FROM users WHERE login = ?", (login,))
+    if cursor.fetchone()[0] > 0:
+        login = f"admin_{secrets.token_hex(2)}"
+    cursor.execute(
+        "INSERT INTO users (user_type, last_name, first_name, middle_name, group_name, login, password) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("admin", "Администратор", "Системы", None, None, login, hash_password(password))
+    )
+    if not os.getenv("QUIZ_ADMIN_PASSWORD"):
+        with open("first_admin_credentials.txt", "w", encoding="utf-8") as f:
+            f.write(f"Логин: {login}\nПароль: {password}\n"
+                    "Смените пароль после первого входа и удалите этот файл.\n")
+    print(f"[security] Создан администратор '{login}'. Данные для входа: first_admin_credentials.txt")
 
 def login_required(request: Request):
     """Декоратор для проверки аутентификации"""
@@ -216,14 +252,7 @@ def init_db():
     if "questions_json" not in result_columns:
         cursor.execute("ALTER TABLE test_results ADD COLUMN questions_json TEXT")
     
-    # Создаем тестового пользователя если его нет
-    cursor.execute("SELECT COUNT(*) FROM users WHERE login = 'admin'")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute(
-            "INSERT INTO users (user_type, last_name, first_name, middle_name, group_name, login, password) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("admin", "Иванов", "Иван", "Иванович", "Администраторы", "admin", hash_password("admin123"))
-        )
-        print("Создан тестовый пользователь: admin / admin123")
+    ensure_admin_exists(cursor)
     
     conn.commit()
     conn.close()
@@ -1421,7 +1450,7 @@ def get_user_by_login(login: str):
             "middle_name": user[4],
             "group_name": user[5],
             "login": user[6],
-            "password": user[7],  # Внимание: хранится в открытом виде!
+            "password": user[7],  # хеш PBKDF2, не открытый текст
             "created_at": user[8]
         }
     return None
@@ -1496,30 +1525,33 @@ def login(
     password: str = Form(...)
 ):
     """Обработка входа"""
+    def login_error(message: str):
+        context = get_template_context(request)
+        context.update({"request": request, "error": message})
+        return templates.TemplateResponse("login.html", context)
+
     try:
-        user = get_user_by_login(username)  # Передаем username как логин
-        if not user:
-            context = get_template_context(request)
-            context.update({
-                "request": request,
-                "error": "Неверный логин или пароль"
-            })
-            return templates.TemplateResponse("login.html", context)
-        
-        # Проверяем пароль (внимание: пароль хранится в открытом виде!)
-        if password != user["password"]:
-            context = get_template_context(request)
-            context.update({
-                "request": request,
-                "error": "Неверный логин или пароль"
-            })
-            return templates.TemplateResponse("login.html", context)
-        
-        # Создаем сессию и устанавливаем cookie
-        from session_manager import create_session
+        username = username.strip()
+        if len(_recent_failures(username)) >= MAX_LOGIN_FAILURES:
+            return login_error("Слишком много неудачных попыток. Попробуйте через 5 минут.")
+
+        user = get_user_by_login(username)
+        # Одинаковое сообщение для «нет логина» и «неверный пароль»,
+        # чтобы нельзя было подбирать существующие логины
+        if not user or not verify_password(password, user["password"]):
+            _login_failures.setdefault(username, []).append(time.time())
+            return login_error("Неверный логин или пароль")
+
+        _login_failures.pop(username, None)
         session_token = create_session(username)
         response = RedirectResponse(url="/select", status_code=303)
-        response.set_cookie(key="session_token", value=session_token, httponly=True)
+        response.set_cookie(
+            key="session_token",
+            value=session_token,
+            httponly=True,          # недоступна из JavaScript
+            samesite="lax",         # не отправляется с чужих сайтов при POST
+            max_age=int(SESSION_LIFETIME.total_seconds()),
+        )
         return response
         
     except Exception as e:
@@ -1914,7 +1946,7 @@ def admin_users_page(request: Request):
             "full_name": full_name,
             "group_name": user[5],
             "login": user[6],
-            "password": user[7],  # Пароль в открытом виде (небезопасно!)
+            # Хеш пароля в шаблон не передаём
             "created_at": user[8]
         })
     
@@ -1956,7 +1988,7 @@ async def add_user(
             """INSERT INTO users 
             (user_type, last_name, first_name, middle_name, group_name, login, password) 
             VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (user_type, last_name, first_name, middle_name, group_name, login, password)
+            (user_type, last_name, first_name, middle_name, group_name, login, hash_password(password))
         )
         conn.commit()
         conn.close()
@@ -1983,9 +2015,17 @@ async def delete_user(request: Request, user_id: int = Form(...)):
     try:
         conn = sqlite3.connect('users.db')
         cursor = conn.cursor()
+        row = cursor.execute("SELECT login FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not row:
+            conn.close()
+            return JSONResponse({"status": "error", "message": "Пользователь не найден"})
+        if row[0] == current_login:
+            conn.close()
+            return JSONResponse({"status": "error", "message": "Нельзя удалить самого себя"})
         cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
         conn.close()
+        remove_user_sessions(row[0])
         return JSONResponse({"status": "success", "message": "Пользователь удален"})
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)})
@@ -2226,9 +2266,69 @@ def show_final_results(request: Request):
     
     return templates.TemplateResponse("final_results.html", context)
 
+MIN_PASSWORD_LENGTH = 8
+
+
+@app.get("/account/password", response_class=HTMLResponse)
+def change_password_page(request: Request, changed: int = 0):
+    if not get_user_from_session(request):
+        return RedirectResponse(url="/", status_code=303)
+    context = get_template_context(request)
+    context["request"] = request
+    if changed:
+        context["message"] = "Пароль изменён. На других устройствах потребуется войти заново."
+    return templates.TemplateResponse("change_password.html", context)
+
+
+@app.post("/account/password", response_class=HTMLResponse)
+def change_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...)
+):
+    """Смена собственного пароля любым пользователем."""
+    login = get_user_from_session(request)
+    if not login:
+        return RedirectResponse(url="/", status_code=303)
+
+    def page(error: Optional[str] = None, message: Optional[str] = None):
+        context = get_template_context(request)
+        context.update({"request": request, "error": error, "message": message})
+        return templates.TemplateResponse("change_password.html", context)
+
+    user = get_user_by_login(login)
+    if not user or not verify_password(current_password, user["password"]):
+        return page(error="Текущий пароль указан неверно")
+    if len(new_password) < MIN_PASSWORD_LENGTH:
+        return page(error=f"Новый пароль должен быть не короче {MIN_PASSWORD_LENGTH} символов")
+    if new_password != confirm_password:
+        return page(error="Новые пароли не совпадают")
+    if new_password == current_password:
+        return page(error="Новый пароль совпадает с текущим")
+
+    with sqlite3.connect("users.db") as conn:
+        conn.execute("UPDATE users SET password = ? WHERE login = ?", (hash_password(new_password), login))
+
+    # Завершаем все сессии пользователя и сразу выдаём новую для текущего браузера
+    remove_user_sessions(login)
+    response = RedirectResponse(url="/account/password?changed=1", status_code=303)
+    response.set_cookie(
+        key="session_token",
+        value=create_session(login),
+        httponly=True,
+        samesite="lax",
+        max_age=int(SESSION_LIFETIME.total_seconds()),
+    )
+    return response
+
+
 @app.get("/logout")
-def logout():
-    """Выход из системы"""
+def logout(request: Request):
+    """Выход из системы: сессия удаляется и на сервере, и в браузере"""
+    session_token = request.cookies.get("session_token")
+    remove_session(session_token)
+    quiz_sessions.pop(session_token, None)
     response = RedirectResponse(url="/", status_code=303)
     response.delete_cookie("session_token")
     return response

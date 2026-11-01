@@ -24,6 +24,11 @@
         </div>
     </div>
 
+    {% if results.credentials %}
+    {% set credentials = results.credentials %}
+    {% include "v2/_credentials_table.html" %}
+    {% endif %}
+
     <!-- Детали результатов в одну строку -->
     <div class="results-details">
         {% if results.existing_users %}

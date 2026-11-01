@@ -34,3 +34,6 @@ _backup/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Пароль первого администратора (создаётся автоматически)
+first_admin_credentials.txt
