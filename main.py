@@ -40,11 +40,52 @@ except Exception as e:
     # Подтверждённая проблема: нет доступа к huggingface.co, не роняем всё приложение
     ai_service = None
     ai_status = None
-questions = []
-reference_answers = []
-user_answers = []
-all_embeddings = []
-quiz_sessions = {}
+# Состояние прохождения тестов: у каждой сессии (браузера) своё.
+# Ключ — session_token, значение — словарь с вопросами, ответами студента и таймингом.
+quiz_sessions: Dict[str, Dict[str, Any]] = {}
+
+# Кэш банков вопросов: эмбеддинги эталонов считаются один раз на файл,
+# а не на каждого студента. Пересчитываются, если файл изменился (mtime).
+_quiz_bank_cache: Dict[str, Dict[str, Any]] = {}
+
+
+def load_quiz_bank(file_path: str) -> Dict[str, Any]:
+    """Возвращает вопросы, эталонные ответы и их эмбеддинги для файла теста (с кэшированием)."""
+    mtime = os.path.getmtime(file_path)
+    cached = _quiz_bank_cache.get(file_path)
+    if cached and cached["mtime"] == mtime:
+        return cached
+
+    df = pd.read_excel(file_path, engine='openpyxl', usecols=[0, 1], header=None, names=['q', 'a'])
+    df = df.dropna(subset=['q'])
+    bank_questions = df['q'].astype(str).tolist()
+    bank_references = [parse_quoted_strings(answers_str) for answers_str in df['a'].fillna("").astype(str)]
+    bank_embeddings = [
+        ai_service.encode(answers_list, convert_to_tensor=True) if answers_list else None
+        for answers_list in bank_references
+    ]
+
+    bank = {
+        "mtime": mtime,
+        "questions": bank_questions,
+        "reference_answers": bank_references,
+        "embeddings": bank_embeddings,
+    }
+    _quiz_bank_cache[file_path] = bank
+    return bank
+
+
+def get_active_quiz(request: Request) -> Optional[Dict[str, Any]]:
+    """Состояние теста, который проходит текущая сессия, или None."""
+    session_token = get_session_token(request)
+    if not session_token:
+        return None
+    return quiz_sessions.get(session_token)
+
+
+def get_unanswered_indexes(quiz_state: Dict[str, Any]) -> List[int]:
+    answers = quiz_state["user_answers"]
+    return [i for i, answer in enumerate(answers) if not (answer or "").strip()]
 
 # Папка для хранения загруженных файлов
 UPLOAD_DIR = "uploaded_files"
@@ -1676,8 +1717,6 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
 
 async def load_quiz_data(request: Request, file_path: str):
     """Загружает данные викторины из файла и начинает тест"""
-    global questions, reference_answers, user_answers, all_embeddings
-    
     try:
         user_login = get_user_from_session(request)
         user_info = get_user_full_info(user_login) if user_login else None
@@ -1714,31 +1753,31 @@ async def load_quiz_data(request: Request, file_path: str):
             })
             return templates.TemplateResponse("select.html", context)
 
-        df = pd.read_excel(file_path, engine='openpyxl', usecols=[0,1], header=None, names=['q','a'])
-        
-        questions = df['q'].astype(str).tolist()
-        reference_answers = [parse_quoted_strings(answers_str) for answers_str in df['a'].astype(str)]
-        
-        # Создаем эмбеддинги для всех эталонных ответов
-        all_embeddings = []
-        for answers_list in reference_answers:
-            embeddings = ai_service.encode(answers_list, convert_to_tensor=True)
-            all_embeddings.append(embeddings)
-        
-        user_answers = []
-        attempt_number = increment_user_attempts_count(user_info.get("login") if user_info else None, filename)
+        bank = load_quiz_bank(file_path)
+        if not bank["questions"]:
+            return render_select_with_error(request, "В файле теста нет вопросов.")
 
         session_token = get_session_token(request)
-        if session_token:
-            quiz_sessions[session_token] = {
-                "filename": filename,
-                "started_at": datetime.now(),
-                "time_limit_minutes": settings.get("time_limit_minutes"),
-                "available_until": settings.get("available_until"),
-                "max_attempts": settings.get("max_attempts"),
-                "attempt_number": attempt_number,
-                "result_saved": False
-            }
+        if not session_token:
+            return RedirectResponse(url="/", status_code=303)
+
+        attempt_number = increment_user_attempts_count(user_info.get("login") if user_info else None, filename)
+
+        quiz_sessions[session_token] = {
+            "filename": filename,
+            # Ссылка на банк фиксирует набор вопросов на время попытки,
+            # даже если преподаватель отредактирует файл посреди теста.
+            "bank": bank,
+            "questions": bank["questions"],
+            "reference_answers": bank["reference_answers"],
+            "user_answers": [""] * len(bank["questions"]),
+            "started_at": datetime.now(),
+            "time_limit_minutes": settings.get("time_limit_minutes"),
+            "available_until": settings.get("available_until"),
+            "max_attempts": settings.get("max_attempts"),
+            "attempt_number": attempt_number,
+            "result_saved": False
+        }
         
         # Перенаправляем на первый вопрос
         return RedirectResponse(url="/quiz?idx=0", status_code=303)
@@ -1965,10 +2004,16 @@ def quiz_form(request: Request, idx: int = 0):
     if restriction_status["error"]:
         return render_select_with_error(request, restriction_status["error"])
     
+    quiz_state = get_active_quiz(request)
+    if not quiz_state:
+        return render_select_with_error(request, "Тест не начат. Выберите тест из списка.")
+    questions = quiz_state["questions"]
+    if idx < 0:
+        return RedirectResponse(url="/quiz?idx=0", status_code=303)
     if idx >= len(questions):
         return RedirectResponse(url="/final_results", status_code=303)
-    
-    current_answer = user_answers[idx] if idx < len(user_answers) else ""
+
+    current_answer = quiz_state["user_answers"][idx]
     
     context = get_template_context(request)
     context.update({
@@ -1993,15 +2038,16 @@ async def save_answer(request: Request, idx: int = Form(...), user_answer: str =
     if restriction_status["error"]:
         raise HTTPException(status_code=403, detail=restriction_status["error"])
 
-    global user_answers
-    try:
-        while len(user_answers) <= idx:
-            user_answers.append("")
-            
-        user_answers[idx] = user_answer.strip()
-        return JSONResponse({"status": "success"})
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    quiz_state = get_active_quiz(request)
+    if not quiz_state:
+        raise HTTPException(status_code=409, detail="Тест не начат")
+    if quiz_state.get("result_saved"):
+        raise HTTPException(status_code=409, detail="Тест уже завершён")
+    if not 0 <= idx < len(quiz_state["questions"]):
+        raise HTTPException(status_code=400, detail="Неверный номер вопроса")
+
+    quiz_state["user_answers"][idx] = user_answer.strip()
+    return JSONResponse({"status": "success"})
 
 @app.post("/navigate")
 async def navigate_question(request: Request, current_idx: int = Form(...), direction: str = Form(...)):
@@ -2012,6 +2058,11 @@ async def navigate_question(request: Request, current_idx: int = Form(...), dire
     restriction_status = get_quiz_restriction_status(request)
     if restriction_status["error"]:
         raise HTTPException(status_code=403, detail=restriction_status["error"])
+
+    quiz_state = get_active_quiz(request)
+    if not quiz_state:
+        raise HTTPException(status_code=409, detail="Тест не начат")
+    questions = quiz_state["questions"]
 
     try:
         if direction == "next":
@@ -2040,18 +2091,17 @@ async def check_test_completion(request: Request):
     if restriction_status["error"]:
         raise HTTPException(status_code=403, detail=restriction_status["error"])
 
-    global user_answers, questions
-    unanswered = []
-    
-    for i in range(len(questions)):
-        if i >= len(user_answers) or not user_answers[i].strip():
-            unanswered.append(i + 1)
-    
+    quiz_state = get_active_quiz(request)
+    if not quiz_state:
+        raise HTTPException(status_code=409, detail="Тест не начат")
+    unanswered = [i + 1 for i in get_unanswered_indexes(quiz_state)]
+    total = len(quiz_state["questions"])
+
     return {
         "completed": len(unanswered) == 0,
         "unanswered": unanswered,
-        "total_questions": len(questions),
-        "answered_count": sum(1 for ans in user_answers if ans and ans.strip())
+        "total_questions": total,
+        "answered_count": total - len(unanswered)
     }
 
 @app.post("/check_completion")
@@ -2077,40 +2127,37 @@ def show_final_results(request: Request):
     
     user_info = get_user_full_info(user)
     user_permissions = get_user_permissions(user_info['user_type'])
-    global user_answers, questions
+    quiz_state = get_active_quiz(request)
+    if not quiz_state:
+        return render_select_with_error(request, "Тест не начат. Выберите тест из списка.")
+    questions = quiz_state["questions"]
+    reference_answers = quiz_state["reference_answers"]
+    all_embeddings = quiz_state["bank"]["embeddings"]
 
-    session_token = get_session_token(request)
-    quiz_state = quiz_sessions.get(session_token) if session_token else None
+    restriction_status = get_quiz_restriction_status(request)
+    force_finish = restriction_status["timed_out"] or restriction_status["deadline_expired"]
+
+    # Не даём завершить тест с пропусками, если время ещё не вышло
+    unanswered = get_unanswered_indexes(quiz_state)
+    if unanswered and not force_finish and not quiz_state.get("result_saved"):
+        return RedirectResponse(url=f"/quiz?idx={unanswered[0]}", status_code=303)
+
     now = datetime.now()
-    started_at = quiz_state.get("started_at") if quiz_state else None
-    finished_at = now
-    if quiz_state:
-        if quiz_state.get("finished_at"):
-            finished_at = quiz_state["finished_at"]
-        else:
-            quiz_state["finished_at"] = now
-            finished_at = now
+    started_at = quiz_state.get("started_at")
+    if not quiz_state.get("finished_at"):
+        quiz_state["finished_at"] = now
+    finished_at = quiz_state["finished_at"]
 
     elapsed_seconds = None
     if started_at:
         elapsed_seconds = max(0, int((finished_at - started_at).total_seconds()))
-    restriction_status = get_quiz_restriction_status(request)
-    force_finish = restriction_status["timed_out"] or restriction_status["deadline_expired"]
-    
-    if len(user_answers) < len(questions) and not force_finish:
-        for i in range(len(questions)):
-            if i >= len(user_answers) or not user_answers[i].strip():
-                return RedirectResponse(url=f"/quiz?idx={i}", status_code=303)
-    
-    answers_for_scoring = list(user_answers)
-    if len(answers_for_scoring) < len(questions):
-        answers_for_scoring.extend([""] * (len(questions) - len(answers_for_scoring)))
+    answers_for_scoring = list(quiz_state["user_answers"])
 
     results = []
     total_correct = 0
     
     for i, user_answer in enumerate(answers_for_scoring):
-        if not user_answer.strip():
+        if not user_answer.strip() or all_embeddings[i] is None:
             results.append({
                 "question": questions[i],
                 "user_answer": "",
@@ -2146,7 +2193,7 @@ def show_final_results(request: Request):
     total_questions = len(questions)
     percentage = (total_correct / total_questions) * 100 if total_questions > 0 else 0
 
-    if quiz_state and not quiz_state.get("result_saved"):
+    if not quiz_state.get("result_saved"):
         save_test_result(
             login=user,
             filename=quiz_state.get("filename"),
