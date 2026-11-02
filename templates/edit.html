@@ -260,15 +260,18 @@
     <input type="hidden" name="filename" value="{{ filename }}">
     <input type="hidden" name="original_data" value="{{ original_data }}">
 
-    {% if filename == "new_file.xlsx" %}
+    <input type="hidden" name="source" value="{{ source or '' }}">
     <div class="settings-block">
         <div class="form-group">
             <label for="test_name">Название теста:</label>
             <input type="text" id="test_name" maxlength="100" required
+                   value="{{ '' if filename == 'new_file.xlsx' else filename.rsplit('.', 1)[0] }}"
                    placeholder="Например: Основы машинного обучения">
+            {% if filename != "new_file.xlsx" %}
+            <small>Измените название, чтобы переименовать тест. История результатов и настройки сохранятся.</small>
+            {% endif %}
         </div>
     </div>
-    {% endif %}
 
     <div class="settings-block">
         <div class="question-header">
@@ -621,6 +624,7 @@ document.getElementById('main-form').addEventListener('submit', function(e) {
     const formData = new FormData();
     formData.append('filename', document.querySelector('input[name="filename"]').value);
     formData.append('original_data', document.querySelector('input[name="original_data"]').value);
+    formData.append('source', document.querySelector('input[name="source"]').value);
     const testNameInput = document.getElementById('test_name');
     if (testNameInput) {
         formData.append('test_name', testNameInput.value.trim());

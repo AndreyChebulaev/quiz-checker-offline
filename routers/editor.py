@@ -1,5 +1,6 @@
 """Редактор тестов и настроек доступа (/editor). Для преподавателей и администраторов."""
 import json
+import os
 
 import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -20,6 +21,7 @@ from services.test_files import (
 from services.test_settings import (
     build_access_context,
     get_test_settings_for_form,
+    rename_test_records,
     upsert_test_settings,
 )
 
@@ -99,6 +101,7 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
             "user_info": user_info,
             "user_permissions": user_permissions,
             "original_data": json.dumps(original_data, ensure_ascii=False) if original_data else "[]",
+            "source": "import",
             "test_settings": test_settings
         }
         context.update(build_access_context(test_settings))
@@ -165,6 +168,7 @@ async def create_new(request: Request):
         "user_info": user_info,
         "user_permissions": user_permissions,
         "original_data": "[]",
+        "source": "new",
         "test_settings": test_settings
     }
     context.update(build_access_context(test_settings))
@@ -234,6 +238,7 @@ async def edit(filename: str, request: Request):
             "filename": safe_filename,
             "questions": questions_data,
             "original_data": "excel_file",
+            "source": "published",
             "user_info": user_info,
             "user_permissions": user_permissions,
             "test_settings": test_settings
@@ -260,7 +265,8 @@ async def save_edit(
     available_until: str = Form(""),
     allowed_students: str = Form(""),
     allowed_groups: str = Form(""),
-    test_name: str = Form("")
+    test_name: str = Form(""),
+    source: str = Form("")
 ):
     user_login = get_user_from_session(request)
     if not user_login:
@@ -295,34 +301,57 @@ async def save_edit(
         
         data.append([question, answers_str])
     
-    # Новый тест сохраняется под названием, которое ввёл преподаватель.
-    # Раньше все новые тесты записывались в new_file.xlsx и затирали друг друга.
+    # Определяем, откуда открыт тест:
+    #   new       — создаётся с нуля (служебное имя new_file.xlsx);
+    #   import    — загружен из Excel в редактор, лежит в uploaded_files_imports;
+    #   published — уже есть в списке тестов (uploaded_files).
     if filename == NEW_TEST_PLACEHOLDER:
-        try:
-            safe_filename = make_test_filename(test_name)
-        except ValueError as e:
-            return JSONResponse(content={"error": str(e)}, status_code=400)
-        if get_saved_file_path(safe_filename).exists():
-            return JSONResponse(
-                content={"error": f"Тест «{safe_filename}» уже существует. Выберите другое название."},
-                status_code=409
-            )
+        source = "new"
     else:
-        safe_filename = normalize_excel_filename(filename)
-        # Сохранять можно опубликованный тест или файл, только что импортированный
-        # в редактор (он лежит в uploaded_files_imports и публикуется при сохранении)
-        is_published = get_saved_file_path(safe_filename).exists()
-        is_imported = get_imported_file_path(safe_filename).exists()
-        if not (is_published or is_imported):
+        original_filename = normalize_excel_filename(filename)
+        if source not in ("import", "published"):
+            source = "published" if get_saved_file_path(original_filename).exists() else "import"
+        source_exists = (get_saved_file_path(original_filename) if source == "published"
+                         else get_imported_file_path(original_filename)).exists()
+        if not source_exists:
             return JSONResponse(content={"error": "Редактируемый тест не найден"}, status_code=404)
-        if safe_filename.lower().endswith(".xls"):
-            # Сохраняем всегда в .xlsx: список тестов показывает только такие файлы
-            safe_filename = safe_filename[:-4] + ".xlsx"
+
+    # Имя файла берётся из поля «Название теста». Пустое поле у существующего
+    # теста означает «оставить прежнее название».
+    try:
+        if source == "new" or test_name.strip():
+            safe_filename = make_test_filename(test_name)
+        else:
+            safe_filename = make_test_filename(original_filename.rsplit(".", 1)[0])
+    except ValueError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+
+    # Нельзя затереть другой опубликованный тест. Исключения: сохранение теста
+    # под его же именем и повторный импорт файла с тем же именем (обновление теста).
+    # casefold: в Windows имена файлов не различают регистр («тест» и «Тест» — один файл)
+    same_as_original = source != "new" and (
+        safe_filename.casefold() == make_test_filename(original_filename.rsplit(".", 1)[0]).casefold()
+    )
+    if get_saved_file_path(safe_filename).exists() and not same_as_original:
+        return JSONResponse(
+            content={"error": f"Тест «{safe_filename}» уже существует. Выберите другое название."},
+            status_code=409
+        )
+    renamed_from = original_filename if source == "published" and safe_filename != original_filename else None
     file_path = get_saved_file_path(safe_filename)
 
     try:
         # Используем нашу утилиту для сохранения без заголовков
-        save_excel_file(str(file_path), data)
+        if renamed_from:
+            # Переименование: записываем в старый файл и переименовываем его
+            # (так корректно работает и смена только регистра букв в Windows),
+            # затем переносим настройки, попытки и историю результатов
+            old_path = get_saved_file_path(renamed_from)
+            save_excel_file(str(old_path), data)
+            os.replace(old_path, file_path)
+            rename_test_records(renamed_from, safe_filename)
+        else:
+            save_excel_file(str(file_path), data)
         upsert_test_settings(safe_filename, time_limit_minutes, max_attempts, available_until, allowed_students, allowed_groups)
 
         # Возвращаем JSON ответ для асинхронного запроса

@@ -75,6 +75,40 @@ check("импортированный тест появился в списке"
 r = t.post("/editor/upload", files={"file": ("Импорт.xlsx", _buf.getvalue(), "application/octet-stream")})
 r = save(t, "Импорт.xlsx", ["Что такое онтология?"], [["описание понятий"]])
 check("повторный импорт с тем же именем обновляет тест", r.status_code == 200)
+
+# --- переименование ---
+import sqlite3 as _sq
+def _db(q, *a): return _sq.connect("users.db").execute(q, a).fetchall()
+r = save(t, "Импорт.xlsx", ["Что такое онтология?"], [["описание понятий"]], source="published", test_name="Онтологии",
+         time_limit_minutes="20", max_attempts="", available_until="", allowed_students="", allowed_groups="")
+check("переименование опубликованного теста", r.status_code == 200 and r.json()["filename"] == "Онтологии.xlsx"
+      and os.path.exists("uploaded_files/Онтологии.xlsx") and not os.path.exists("uploaded_files/Импорт.xlsx"), r.json())
+check("настройки переехали на новое имя", _db("select time_limit_minutes from test_settings where filename='Онтологии.xlsx'") == [(20,)]
+      and _db("select count(*) from test_settings where filename='Импорт.xlsx'") == [(0,)])
+# история результатов: студент проходит, потом тест переименовывают
+save(t, "Онтологии.xlsx", ["Что такое онтология?"], [["описание понятий"]], source="published", allowed_groups=first["student"][1] or "")
+s.post("/select", data={"filename": "Онтологии.xlsx"}); s.post("/answer", data={"idx": 0, "user_answer": "описание понятий"}); s.get("/final_results")
+before = _db("select count(*) from test_results where filename='Онтологии.xlsx'")[0][0]
+r = save(t, "Онтологии.xlsx", ["Что такое онтология?"], [["описание понятий"]], source="published", test_name="Онтология",
+         allowed_groups=first["student"][1] or "")
+check("история результатов сохранилась после переименования", before == 1
+      and _db("select count(*) from test_results where filename='Онтология.xlsx'") == [(1,)], (before, r.json()))
+check("попытки студента сохранились", _db("select count(*) from test_attempts where filename='Онтология.xlsx'") == [(1,)])
+r = save(t, "Онтология.xlsx", ["q"], [["a"]], source="published", test_name="Тест1")
+check("нельзя переименовать в имя другого теста", r.status_code == 409 or not os.path.exists("uploaded_files/Тест1.xlsx"), r.json())
+r = save(t, "Онтология.xlsx", ["Что такое онтология?"], [["описание понятий"]], source="published", test_name="ОНТОЛОГИЯ",
+         allowed_groups=first["student"][1] or "")
+check("смена регистра букв", r.status_code == 200 and os.path.exists("uploaded_files/ОНТОЛОГИЯ.xlsx")
+      and not os.path.exists("uploaded_files/Онтология.xlsx"), r.json())
+r = save(t, "ОНТОЛОГИЯ.xlsx", ["Что такое онтология?"], [["описание понятий"]], source="published", test_name="")
+check("пустое название = прежнее", r.status_code == 200 and r.json()["filename"] == "ОНТОЛОГИЯ.xlsx", r.json())
+r = t.post("/editor/upload", files={"file": ("Сырой импорт.xlsx", _buf.getvalue(), "application/octet-stream")})
+r = save(t, "Сырой импорт.xlsx", ["Что такое онтология?"], [["x"]], source="import", test_name="Импорт переименованный")
+check("импорт сразу под другим названием", r.status_code == 200 and os.path.exists("uploaded_files/Импорт переименованный.xlsx")
+      and not os.path.exists("uploaded_files/Сырой импорт.xlsx"), r.json())
+r = t.post("/editor/upload", files={"file": ("Ещё.xlsx", _buf.getvalue(), "application/octet-stream")})
+r = save(t, "Ещё.xlsx", ["q"], [["a"]], source="import", test_name="ОНТОЛОГИЯ")
+check("импорт не затирает другой тест", r.status_code == 409, r.json())
 import openpyxl
 r = save(t, "Несуществующий.xlsx", ["q"], [["a"]])
 check("правка несуществующего теста отклоняется", r.status_code == 404)

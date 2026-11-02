@@ -312,3 +312,17 @@ def upsert_test_settings(
     )
     conn.commit()
     conn.close()
+
+
+def rename_test_records(old_filename: str, new_filename: str) -> None:
+    """Переносит настройки, счётчики попыток и историю результатов на новое имя теста."""
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM test_settings WHERE filename = ?", (new_filename,))
+        cursor.execute("UPDATE test_settings SET filename = ? WHERE filename = ?", (new_filename, old_filename))
+        cursor.execute("UPDATE test_attempts SET filename = ? WHERE filename = ?", (new_filename, old_filename))
+        cursor.execute("UPDATE test_results SET filename = ? WHERE filename = ?", (new_filename, old_filename))
+        conn.commit()
+    finally:
+        conn.close()
