@@ -1,0 +1,26 @@
+flowchart TB
+    B["Браузер<br/>студент · преподаватель · администратор"]
+    subgraph APP["Веб-приложение FastAPI"]
+        direction TB
+        subgraph R["Маршруты (routers)"]
+            direction LR
+            R1["auth<br/>вход, пароли"] --- R2["tests<br/>список, файлы"] --- R3["quiz<br/>прохождение"] --- R4["results<br/>результаты"] --- R5["review<br/>проверка"] --- R6["editor<br/>редактор"] --- R7["users<br/>пользователи"]
+        end
+        subgraph S["Сервисы (services)"]
+            direction LR
+            S1["scoring<br/>решение по ответу"] --- S2["ai_backend<br/>ML-модель"] --- S3["quiz<br/>банк вопросов"] --- S4["review<br/>оценки ответов"] --- S5["test_access<br/>права"] --- S6["results<br/>поиск, Excel"]
+        end
+        subgraph C["Ядро (core)"]
+            direction LR
+            C1["database<br/>таблицы, миграции"] --- C2["security<br/>PBKDF2"] --- C3["sessions"] --- C4["web<br/>шаблоны Jinja2"]
+        end
+    end
+    DB[("SQLite<br/>users.db")]
+    F[["Файлы тестов<br/>.xlsx"]]
+    M[["Модель ruBERT-tiny2<br/>local_models/"]]
+    B -- "HTTP" --> R
+    R --> S
+    S --> C
+    C --> DB
+    S --> F
+    S2 --> M

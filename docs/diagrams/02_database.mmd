@@ -1,0 +1,71 @@
+erDiagram
+    USERS ||--o{ SESSIONS : "login"
+    USERS ||--o{ TEST_RESULTS : "проходит"
+    USERS ||--o{ TEST_SETTINGS : "владеет (owner_login)"
+    USERS ||--o{ TEST_SHARES : "получает доступ"
+    TEST_SETTINGS ||--o{ TEST_SHARES : "filename"
+    TEST_SETTINGS ||--o{ TEST_ATTEMPTS : "filename"
+    TEST_SETTINGS ||--o{ TEST_RESULTS : "filename"
+    TEST_RESULTS ||--|{ ANSWER_RESULTS : "result_id"
+    USERS {
+        int id PK
+        text login UK
+        text password "PBKDF2"
+        text user_type "student/teacher/admin"
+        text last_name
+        text first_name
+        text group_name
+        int show_all_tests
+    }
+    SESSIONS {
+        text token_hash PK "SHA-256"
+        text login
+        text expires_at
+    }
+    TEST_SETTINGS {
+        int id PK
+        text filename UK
+        text owner_login
+        int time_limit_minutes
+        int max_attempts
+        text available_until
+        text allowed_students
+        text allowed_groups
+        int students_closed
+        real threshold
+        real review_margin
+    }
+    TEST_SHARES {
+        text filename PK
+        text teacher_login PK
+        int can_edit
+        int can_view_results
+    }
+    TEST_ATTEMPTS {
+        int id PK
+        text login
+        text filename
+        int attempts_count
+    }
+    TEST_RESULTS {
+        int id PK
+        text login
+        text filename
+        int attempt_number
+        int total_correct
+        real percentage
+        int pending_review
+        real threshold
+        text finished_at
+    }
+    ANSWER_RESULTS {
+        int id PK
+        int result_id FK
+        int question_index
+        text user_answer
+        text best_reference
+        real score
+        text auto_verdict
+        text final_verdict
+        text reviewed_by
+    }
