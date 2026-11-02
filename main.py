@@ -11,8 +11,11 @@ from config import STATIC_DIR
 from core.database import init_db
 from core.web import RedirectRequired
 from routers import auth, editor, quiz, results, review, tests, users
+from services.test_access import init_access_tables, migrate_legacy_owners
 
 init_db()
+init_access_tables()
+migrate_legacy_owners()
 
 app = FastAPI(title="Проверка открытых вопросов")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from config import DATABASE_PATH
 from services.formatting import format_datetime_ru, parse_datetime_db
+from services.test_access import results_tests
 from services.scoring import VERDICT_CORRECT, VERDICT_INCORRECT, VERDICT_LABELS, AnswerEvaluation
 
 FINAL_VERDICT_SQL = "COALESCE(a.final_verdict, a.auto_verdict)"
@@ -119,20 +120,40 @@ def get_answer_results(result_id: int) -> List[Dict[str, Any]]:
     return items
 
 
-def count_pending_reviews() -> int:
+def get_answer_filename(answer_id: int) -> Optional[str]:
+    """Тест, к которому относится ответ (для проверки прав)."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT r.filename FROM answer_results a JOIN test_results r ON r.id = a.result_id WHERE a.id = ?",
+            (answer_id,),
+        ).fetchone()
+    return row[0] if row else None
+
+
+def _allowed_filter(login: str) -> tuple:
+    """SQL-условие «тест доступен преподавателю для проверки» и его параметры."""
+    allowed = sorted(results_tests(login))
+    return f"r.filename IN ({','.join('?' * len(allowed)) or 'NULL'})", allowed
+
+
+def count_pending_reviews(login: str) -> int:
+    condition, params = _allowed_filter(login)
     with _connect() as conn:
         try:
             return conn.execute(
-                "SELECT COUNT(*) FROM answer_results WHERE auto_verdict = 'review' AND final_verdict IS NULL"
+                "SELECT COUNT(*) FROM answer_results a JOIN test_results r ON r.id = a.result_id "
+                f"WHERE a.auto_verdict = 'review' AND a.final_verdict IS NULL AND {condition}",
+                params,
             ).fetchone()[0]
         except sqlite3.OperationalError:
             return 0
 
 
-def get_review_queue(test_filter: str = "", limit: int = 200) -> Dict[str, Any]:
+def get_review_queue(login: str, test_filter: str = "", limit: int = 200) -> Dict[str, Any]:
     """Ответы, ожидающие решения преподавателя, — сначала самые старые."""
-    params: List[Any] = []
-    where = "a.auto_verdict = 'review' AND a.final_verdict IS NULL"
+    condition, params = _allowed_filter(login)
+    params = list(params)
+    where = f"a.auto_verdict = 'review' AND a.final_verdict IS NULL AND {condition}"
     if test_filter:
         where += " AND r.filename = ?"
         params.append(test_filter)
@@ -151,9 +172,11 @@ def get_review_queue(test_filter: str = "", limit: int = 200) -> Dict[str, Any]:
             """,
             params,
         ).fetchall()
+        tests_condition, tests_params = _allowed_filter(login)
         tests = [row[0] for row in conn.execute(
             "SELECT DISTINCT r.filename FROM answer_results a JOIN test_results r ON r.id = a.result_id "
-            "WHERE a.auto_verdict = 'review' AND a.final_verdict IS NULL ORDER BY r.filename"
+            f"WHERE a.auto_verdict = 'review' AND a.final_verdict IS NULL AND {tests_condition} ORDER BY r.filename",
+            tests_params,
         ).fetchall()]
     items = []
     for r in rows:

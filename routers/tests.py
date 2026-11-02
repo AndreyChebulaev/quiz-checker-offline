@@ -16,6 +16,7 @@ from services.test_files import (
     get_uploaded_files,
     validate_uploaded_excel_filename,
 )
+from services.test_access import can_edit_test, get_owner, get_test_access, is_manager, set_owner
 from services.test_settings import (
     can_user_access_test,
     get_attempt_limit_status,
@@ -72,8 +73,12 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
 
         # Сохраняем файл в папку uploaded_files
         file_path = get_uploaded_file_path(safe_filename)
+        if os.path.exists(file_path) and not can_edit_test(user_info, safe_filename):
+            raise HTTPException(status_code=409, detail=f"Тест «{safe_filename}» уже существует. Переименуйте файл.")
         with open(file_path, "wb") as f:
             f.write(await file.read())
+        if not get_owner(safe_filename):
+            set_owner(safe_filename, user_login)
         
         # Возвращаем на страницу выбора файлов с сообщением об успехе
         files = get_uploaded_files(user_info)
@@ -112,10 +117,9 @@ async def load_quiz_data(request: Request, file_path: str):
         user_login = get_user_from_session(request)
         user_info = get_user_full_info(user_login) if user_login else None
 
-        # region agent log H2 – загрузка теста и наличие модели
-        # endregion
-
         filename = os.path.basename(file_path)
+        if is_manager(user_info) and not can_edit_test(user_info, filename):
+            return render_select_with_error(request, "Тест не найден.")
         settings = get_test_settings(filename)
         available_until_dt = parse_available_until(settings.get("available_until"))
         if available_until_dt and datetime.now() > available_until_dt:
@@ -223,7 +227,8 @@ async def download_uploaded_file(request: Request, filename: str):
 
     safe_filename = validate_uploaded_excel_filename(filename)
     file_path = get_uploaded_file_path(safe_filename)
-    if not os.path.exists(file_path):
+    # Чужой тест для преподавателя «не существует», чтобы не раскрывать названия
+    if not os.path.exists(file_path) or not can_edit_test(user_info, safe_filename):
         raise HTTPException(status_code=404, detail="Файл не найден")
 
     return FileResponse(
@@ -250,6 +255,11 @@ async def delete_file(request: Request, filename: str = Form(...)):
     try:
         safe_filename = validate_uploaded_excel_filename(filename)
         file_path = get_uploaded_file_path(safe_filename)
+        access = get_test_access(user_info, safe_filename)
+        if not access["edit"]:
+            return JSONResponse({"status": "error", "message": "Файл не найден"})
+        if not access["owner"]:
+            return JSONResponse({"status": "error", "message": "Удалить тест может только его владелец"}, status_code=403)
         if os.path.exists(file_path):
             os.remove(file_path)
             return JSONResponse({"status": "success", "message": f"Файл {safe_filename} удален"})

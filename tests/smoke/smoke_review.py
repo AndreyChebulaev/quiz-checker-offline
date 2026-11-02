@@ -20,6 +20,8 @@ from fastapi.testclient import TestClient
 import main
 from services.ai_backend import ai_service, THRESHOLD
 # Управляемая оценка: число в начале ответа и есть «сходство»
+from services.test_access import set_owner
+set_owner('Проверка.xlsx', first['teacher'][0])
 ai_service.score_answer = lambda ans, refs, emb: (float(ans.split()[0]), refs[0])
 ok = True
 def check(name, cond, extra=""):

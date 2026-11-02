@@ -4,7 +4,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from core.users_repo import get_user_full_info, get_user_permissions
 from core.web import RedirectRequired, get_template_context, get_user_from_session, templates
-from services.review import get_review_queue, set_answer_verdict
+from services.review import get_answer_filename, get_review_queue, set_answer_verdict
+from services.test_access import can_view_test_results
 
 
 def require_teacher(request: Request) -> str:
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/review")
 
 @router.get("", response_class=HTMLResponse)
 def review_queue_page(request: Request, test: str = "", login: str = Depends(require_teacher)):
-    queue = get_review_queue(test_filter=test)
+    queue = get_review_queue(login, test_filter=test)
     context = get_template_context(request)
     context.update({
         "request": request,
@@ -40,6 +41,9 @@ def review_queue_page(request: Request, test: str = "", login: str = Depends(req
 @router.post("/answers/{answer_id}")
 def review_answer(answer_id: int, verdict: str = Form(...), login: str = Depends(require_teacher)):
     """verdict: correct / incorrect / auto (вернуть автоматическое решение)."""
+    filename = get_answer_filename(answer_id)
+    if filename is None or not can_view_test_results(get_user_full_info(login), filename):
+        raise HTTPException(status_code=404, detail="Ответ не найден")
     try:
         result = set_answer_verdict(answer_id, None if verdict == "auto" else verdict, login)
     except ValueError as e:

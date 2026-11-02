@@ -273,71 +273,44 @@
         </div>
     </div>
 
-    <div class="settings-block">
+    <div class="settings-block test-settings">
         <div class="question-header">
-            <h3>Ограничения теста</h3>
+            <h3>Ограничения и проверка</h3>
         </div>
-        <div class="form-group">
-            <label>Лимит времени (минуты):</label>
-            <input
-                type="number"
-                id="time_limit_minutes"
-                min="1"
-                step="1"
-                value="{{ test_settings.time_limit_minutes if test_settings else '' }}"
-                placeholder="Например: 30"
-                style="padding: 12px;"
-            >
+        <div class="settings-grid">
+            <div class="settings-field">
+                <label for="time_limit_minutes">Лимит времени, мин</label>
+                <input type="number" id="time_limit_minutes" min="1" step="1"
+                       value="{{ test_settings.time_limit_minutes if test_settings else '' }}" placeholder="без лимита">
+            </div>
+            <div class="settings-field">
+                <label for="max_attempts">Число попыток</label>
+                <input type="number" id="max_attempts" min="1" step="1"
+                       value="{{ test_settings.max_attempts if test_settings else '' }}" placeholder="без лимита">
+            </div>
+            <div class="settings-field">
+                <label for="available_until">Дедлайн</label>
+                <input type="date" id="available_until"
+                       value="{{ test_settings.available_until if test_settings else '' }}">
+            </div>
         </div>
-        <div class="form-group">
-            <label>Лимит попыток прохождения:</label>
-            <input
-                type="number"
-                id="max_attempts"
-                min="1"
-                step="1"
-                value="{{ test_settings.max_attempts if test_settings else '' }}"
-                placeholder="Например: 3"
-                style="padding: 12px;"
-            >
+        <div class="settings-grid settings-grid-2">
+            <div class="settings-field">
+                <label for="threshold">Порог зачёта (0–1)</label>
+                <input type="number" id="threshold" min="0" max="1" step="0.01"
+                       value="{{ test_settings.threshold if test_settings else '' }}"
+                       placeholder="{{ '%.2f'|format(default_threshold) }}">
+                <small class="field-hint">Пусто — {{ '%.2f'|format(default_threshold) }} (подобран в эксперименте). Выше — строже.</small>
+            </div>
+            <div class="settings-field">
+                <label for="review_margin">Зона ручной проверки</label>
+                <input type="number" id="review_margin" min="0" max="0.5" step="0.01"
+                       value="{{ test_settings.review_margin if test_settings else '' }}"
+                       placeholder="{{ '%.2f'|format(default_review_margin) }}">
+                <small class="field-hint">Оценки от «порог − зона» до порога проверяет преподаватель. 0 — выключить.</small>
+            </div>
         </div>
-        <div class="form-group">
-            <label>Дедлайн выполнения:</label>
-            <input
-                type="date"
-                id="available_until"
-                value="{{ test_settings.available_until if test_settings else '' }}"
-                style="padding: 12px;"
-            >
-        </div>
-        <div class="form-group">
-            <label for="threshold">Порог сходства для зачёта ответа (0–1):</label>
-            <input
-                type="number"
-                id="threshold"
-                min="0"
-                max="1"
-                step="0.01"
-                value="{{ test_settings.threshold if test_settings else '' }}"
-                placeholder="По умолчанию {{ '%.2f'|format(default_threshold) }} — подобран экспериментально"
-                style="padding: 12px;"
-            >
-            <small>Выше порог — строже проверка. Оставьте пустым, чтобы использовать значение для модели.</small>
-        </div>
-        <div class="form-group">
-            <label for="review_margin">Ширина зоны ручной проверки:</label>
-            <input
-                type="number"
-                id="review_margin"
-                min="0"
-                max="0.5"
-                step="0.01"
-                value="{{ test_settings.review_margin if test_settings else '' }}"
-                placeholder="По умолчанию {{ '%.2f'|format(default_review_margin) }}; 0 — без ручной проверки"
-                style="padding: 12px;"
-            >
-            <small>Ответы с оценкой от «порог − ширина» до порога уходят преподавателю на проверку.</small>
-        </div>
+        <div class="settings-grid settings-grid-wide">
         <div class="form-group">
             <label>Доступ для студентов:</label>
             <div class="access-dropdown">
@@ -388,6 +361,42 @@
                 </div>
             </div>
         </div>
+        </div>
+        <small class="field-hint">Если не выбраны ни студенты, ни группы, тест доступен всем студентам.</small>
+    </div>
+
+    <div class="settings-block teacher-access">
+        <div class="question-header">
+            <h3>Доступ преподавателей</h3>
+        </div>
+        {% if is_test_owner %}
+        <p class="field-hint" style="margin-top:0">
+            Тест видите только вы. Отметьте коллег, которым нужно открыть тест для редактирования
+            или его результаты (просмотр и проверка спорных ответов). Удалить и переименовать тест может только владелец.
+        </p>
+        {% if teacher_shares %}
+        <input type="text" id="teacher_search" class="access-search" placeholder="Поиск преподавателя">
+        <div class="teacher-share-list" id="teacher_share_list">
+            <div class="teacher-share-row teacher-share-head">
+                <span>Преподаватель</span><span>Тест</span><span>Результаты</span>
+            </div>
+            {% for t in teacher_shares %}
+            <label class="teacher-share-row" data-login="{{ t.login }}" data-search="{{ (t.full_name ~ ' ' ~ t.login)|lower }}">
+                <span>{{ t.full_name }} <small>({{ t.login }}, {{ t.role }})</small></span>
+                <span><input type="checkbox" class="share-edit" {% if t.can_edit %}checked{% endif %} title="Видеть и редактировать тест"></span>
+                <span><input type="checkbox" class="share-results" {% if t.can_view_results %}checked{% endif %} title="Видеть результаты и проверять ответы"></span>
+            </label>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="field-hint">Других преподавателей в системе пока нет.</p>
+        {% endif %}
+        {% else %}
+        <p class="field-hint" style="margin-top:0">
+            Владелец теста: <strong>{{ test_owner_name }}</strong>. Вам открыт доступ на редактирование;
+            настраивать доступ, переименовывать и удалять тест может только владелец.
+        </p>
+        {% endif %}
     </div>
 
     <div id="questions-container">
@@ -448,6 +457,36 @@
     </div>
 </form>
 
+<style>
+    .test-settings .settings-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px 18px;
+        margin-bottom: 14px;
+    }
+    .test-settings .settings-grid-2,
+    .test-settings .settings-grid-wide { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    @media (max-width: 700px) {
+        .test-settings .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .test-settings .settings-grid-2,
+        .test-settings .settings-grid-wide { grid-template-columns: 1fr; }
+    }
+    .test-settings .settings-grid .form-group { margin: 0; }
+    .settings-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .settings-field label { font-weight: 600; font-size: 14px; color: #2c3e50; }
+    .settings-field input { width: 100%; box-sizing: border-box; padding: 9px 10px; }
+    .field-hint { display: block; color: #7f8c8d; font-size: 12px; line-height: 1.35; }
+    .teacher-share-list { border: 1px solid #e1e8ed; border-radius: 8px; max-height: 260px; overflow-y: auto; margin-top: 8px; }
+    .teacher-share-row {
+        display: grid; grid-template-columns: 1fr 90px 100px; align-items: center;
+        padding: 7px 12px; border-bottom: 1px solid #f0f3f6; cursor: pointer; margin: 0; font-weight: normal;
+    }
+    .teacher-share-row:last-child { border-bottom: none; }
+    .teacher-share-row span:not(:first-child) { text-align: center; }
+    .teacher-share-row small { color: #7f8c8d; }
+    .teacher-share-head { position: sticky; top: 0; background: #f7f9fb; font-weight: 600; font-size: 13px; cursor: default; }
+    .teacher-access #teacher_search { margin-top: 4px; }
+</style>
 <style>
     .container .actions.editor-sticky-actions {
         position: sticky;
@@ -685,6 +724,17 @@ document.addEventListener('click', () => {
     });
 });
 
+// Поиск преподавателя в блоке доступа
+const teacherSearch = document.getElementById('teacher_search');
+if (teacherSearch) {
+    teacherSearch.addEventListener('input', () => {
+        const q = teacherSearch.value.trim().toLowerCase();
+        document.querySelectorAll('#teacher_share_list .teacher-share-row[data-login]').forEach((row) => {
+            row.style.display = row.dataset.search.includes(q) ? '' : 'none';
+        });
+    });
+}
+
 // --- Несохранённые изменения и Ctrl+S ---
 const mainForm = document.getElementById('main-form');
 const saveStatus = document.getElementById('save-status');
@@ -750,6 +800,15 @@ mainForm.addEventListener('submit', function(e) {
     formData.append('max_attempts', document.getElementById('max_attempts').value.trim());
     formData.append('available_until', document.getElementById('available_until').value);
     formData.append('threshold', document.getElementById('threshold').value.trim());
+    const shareList = document.getElementById('teacher_share_list');
+    if (shareList) {
+        const shares = [...shareList.querySelectorAll('.teacher-share-row[data-login]')].map((row) => ({
+            login: row.dataset.login,
+            can_edit: row.querySelector('.share-edit').checked,
+            can_view_results: row.querySelector('.share-results').checked,
+        })).filter((s) => s.can_edit || s.can_view_results);
+        formData.append('teacher_shares', JSON.stringify(shares));
+    }
     formData.append('review_margin', document.getElementById('review_margin').value.trim());
     formData.append('allowed_students', getCheckedValues('.allowed-student-checkbox'));
     formData.append('allowed_groups', getCheckedValues('.allowed-group-checkbox'));

@@ -72,6 +72,11 @@
                                         Дедлайн: {{ file.available_until_display }}
                                     </span>
                                     {% endif %}
+                                    {% if file.owner_name %}
+                                    <span class="test-meta-chip" title="Тест другого преподавателя, вам открыт доступ">
+                                        Владелец: {{ file.owner_name }}
+                                    </span>
+                                    {% endif %}
                                 </div>
                                 {% if not file.is_available and not file.is_limit_expired %}
                                 <div class="test-meta-warning">
@@ -99,10 +104,10 @@
                                 {% endif %}
                             </form>
 
-                            {% if user_permissions.can_delete_files %}
+                            {% if file.can_edit %}
                             <button type="button" onclick='editFile({{ file.name | tojson }})' class="btn btn-edit">Изменить</button>
                             {% endif %}
-                            {% if user_permissions.can_delete_files %}
+                            {% if file.is_owner %}
                             <button type="button" onclick='deleteFile({{ file.name | tojson }})' class="btn btn-delete">Удалить</button>
                             {% endif %}
                         </div>
@@ -111,7 +116,11 @@
                 {% else %}
                     <div class="no-users">
                         <h3>Нет доступных тестов</h3>
-                        <p>Обратитесь к администратору для загрузки тестов</p>
+                        {% if user_permissions and user_permissions.can_edit_tests %}
+                        <p>Создайте тест или загрузите его из Excel в разделе «Новый тест».</p>
+                        {% else %}
+                        <p>Преподаватель ещё не открыл вам доступ к тестам.</p>
+                        {% endif %}
                     </div>
                 {% endif %}
             </div>

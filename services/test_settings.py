@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from config import DATABASE_PATH
+from services.test_access import rename_test_access
 
 
 def get_test_settings(filename: str) -> Dict[str, Any]:
@@ -324,6 +325,7 @@ def rename_test_records(old_filename: str, new_filename: str) -> None:
         cursor.execute("UPDATE test_settings SET filename = ? WHERE filename = ?", (new_filename, old_filename))
         cursor.execute("UPDATE test_attempts SET filename = ? WHERE filename = ?", (new_filename, old_filename))
         cursor.execute("UPDATE test_results SET filename = ? WHERE filename = ?", (new_filename, old_filename))
+        rename_test_access(old_filename, new_filename, conn)
         conn.commit()
     finally:
         conn.close()

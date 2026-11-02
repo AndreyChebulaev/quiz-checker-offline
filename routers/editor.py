@@ -8,6 +8,16 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 
 from core.users_repo import get_user_full_info, get_user_permissions
 from core.web import get_user_from_session, templates
+from services.test_access import (
+    can_edit_test,
+    get_owner,
+    get_teacher_shares,
+    get_test_access,
+    get_user_display_name,
+    parse_teacher_shares,
+    save_teacher_shares,
+    set_owner,
+)
 from services.test_files import (
     NEW_TEST_PLACEHOLDER,
     get_imported_file_path,
@@ -28,6 +38,18 @@ from services.test_settings import (
 )
 
 router = APIRouter(prefix="/editor")
+
+
+def teacher_access_context(filename: str, user_info: dict) -> dict:
+    """Кто владелец теста и кому открыт доступ — для блока «Доступ преподавателей»."""
+    is_published = filename != NEW_TEST_PLACEHOLDER and get_saved_file_path(filename).exists()
+    owner = (get_owner(filename) if is_published else None) or user_info["login"]
+    is_owner = owner == user_info["login"]
+    return {
+        "is_test_owner": is_owner,
+        "test_owner_name": get_user_display_name(owner),
+        "teacher_shares": get_teacher_shares(filename if is_published else None, owner) if is_owner else [],
+    }
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -104,6 +126,7 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
             "test_settings": test_settings
         }
         context.update(build_access_context(test_settings))
+        context.update(teacher_access_context(context["filename"], user_info))
         return templates.TemplateResponse("edit.html", context)
     
     except Exception as e:
@@ -127,7 +150,7 @@ async def download_file(filename: str, request: Request):
     
     safe_filename = normalize_excel_filename(filename)
     file_path = get_saved_file_path(safe_filename)
-    if not file_path.exists():
+    if not file_path.exists() or not can_edit_test(user_info, safe_filename):
         raise HTTPException(status_code=404, detail="Файл не найден")
     
     return FileResponse(
@@ -169,6 +192,7 @@ async def create_new(request: Request):
         "test_settings": test_settings
     }
     context.update(build_access_context(test_settings))
+    context.update(teacher_access_context(context["filename"], user_info))
     return templates.TemplateResponse("edit.html", context)
 
 
@@ -188,8 +212,8 @@ async def edit(filename: str, request: Request):
     # Путь к директории с файлами
     safe_filename = normalize_excel_filename(filename)
     file_path = get_saved_file_path(safe_filename)
-    
-    if not file_path.exists():
+
+    if not file_path.exists() or not can_edit_test(user_info, safe_filename):
         return JSONResponse(
             content={"error": f"Файл {filename} не найден на сервере"},
             status_code=404
@@ -236,6 +260,7 @@ async def edit(filename: str, request: Request):
             "test_settings": test_settings
         }
         context.update(build_access_context(test_settings))
+        context.update(teacher_access_context(context["filename"], user_info))
         return templates.TemplateResponse("edit.html", context)
         
     except Exception as e:
@@ -259,7 +284,8 @@ async def save_edit(
     test_name: str = Form(""),
     source: str = Form(""),
     threshold: str = Form(""),
-    review_margin: str = Form("")
+    review_margin: str = Form(""),
+    teacher_shares: str = Form("")
 ):
     user_login = get_user_from_session(request)
     if not user_login:
@@ -296,6 +322,7 @@ async def save_edit(
     
     try:
         scoring_settings = parse_scoring_settings(threshold, review_margin)
+        shares = parse_teacher_shares(teacher_shares)
     except ValueError as e:
         return JSONResponse(content={"error": str(e)}, status_code=400)
 
@@ -312,6 +339,9 @@ async def save_edit(
         source_exists = (get_saved_file_path(original_filename) if source == "published"
                          else get_imported_file_path(original_filename)).exists()
         if not source_exists:
+            return JSONResponse(content={"error": "Редактируемый тест не найден"}, status_code=404)
+        # Чужой опубликованный тест без открытого доступа «не существует»
+        if source == "published" and not can_edit_test(user_info, original_filename):
             return JSONResponse(content={"error": "Редактируемый тест не найден"}, status_code=404)
 
     # Имя файла берётся из поля «Название теста». Пустое поле у существующего
@@ -330,12 +360,17 @@ async def save_edit(
     same_as_original = source != "new" and (
         safe_filename.casefold() == make_test_filename(original_filename.rsplit(".", 1)[0]).casefold()
     )
-    if get_saved_file_path(safe_filename).exists() and not same_as_original:
+    target_exists = get_saved_file_path(safe_filename).exists()
+    # Повторный импорт под тем же именем обновляет тест — только если это свой (или открытый) тест
+    if target_exists and (not same_as_original or not can_edit_test(user_info, safe_filename)):
         return JSONResponse(
             content={"error": f"Тест «{safe_filename}» уже существует. Выберите другое название."},
             status_code=409
         )
     renamed_from = original_filename if source == "published" and safe_filename != original_filename else None
+    if renamed_from and safe_filename.casefold() != original_filename.casefold() \
+            and not get_test_access(user_info, original_filename)["owner"]:
+        return JSONResponse(content={"error": "Переименовать тест может только его владелец"}, status_code=403)
     file_path = get_saved_file_path(safe_filename)
 
     try:
@@ -352,6 +387,10 @@ async def save_edit(
             save_excel_file(str(file_path), data)
         upsert_test_settings(safe_filename, time_limit_minutes, max_attempts, available_until, allowed_students, allowed_groups)
         set_scoring_settings(safe_filename, scoring_settings["threshold"], scoring_settings["review_margin"])
+        if not get_owner(safe_filename):
+            set_owner(safe_filename, user_login)  # новый тест принадлежит тому, кто его создал
+        if shares is not None and get_test_access(user_info, safe_filename)["owner"]:
+            save_teacher_shares(safe_filename, user_login, shares)
 
         # Возвращаем JSON ответ для асинхронного запроса
         return JSONResponse(

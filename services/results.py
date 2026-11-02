@@ -18,6 +18,7 @@ from services.formatting import (
 )
 from services.results_search import apply_ai_result_search, normalize_search_text
 from services.review import get_answer_results
+from services.test_access import can_view_test_results, results_tests
 
 
 def save_test_result(
@@ -133,8 +134,12 @@ def get_test_result_tests_for_view(user_info: Optional[Dict[str, Any]]) -> List[
 
     try:
         if is_manager:
+            # Только тесты, к результатам которых у преподавателя есть доступ
+            allowed = sorted(results_tests(user_info.get("login")))
+            placeholders = ",".join("?" * len(allowed)) or "NULL"
             cursor.execute(
-                "SELECT DISTINCT filename FROM test_results WHERE filename IS NOT NULL AND filename != '' ORDER BY filename COLLATE NOCASE ASC"
+                f"SELECT DISTINCT filename FROM test_results WHERE filename IN ({placeholders}) ORDER BY filename COLLATE NOCASE ASC",
+                tuple(allowed)
             )
         else:
             cursor.execute(
@@ -207,6 +212,12 @@ def get_test_results_for_view(
         if not is_manager:
             where_parts.append("r.login = ?")
             params.append(user_info.get("login"))
+        else:
+            # Преподаватель видит результаты только своих тестов и тестов, к результатам которых ему открыт доступ
+            allowed = sorted(results_tests(user_info.get("login")))
+            placeholders = ",".join("?" * len(allowed)) or "NULL"
+            where_parts.append(f"r.filename IN ({placeholders})")
+            params.extend(allowed)
 
         if safe_status_filter == "normal":
             where_parts.append("r.forced_finish = 0")
@@ -362,9 +373,8 @@ def get_test_result_detail_for_view(user_info: Optional[Dict[str, Any]], result_
         questions_json
     ) = row
 
-    is_manager = user_info.get("user_type") in ["teacher", "admin"]
     current_login = user_info.get("login")
-    if not is_manager and login != current_login:
+    if login != current_login and not can_view_test_results(user_info, filename):
         return None
 
     full_name = f"{(last_name or '').strip()} {(first_name or '').strip()}".strip()

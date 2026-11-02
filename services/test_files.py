@@ -13,6 +13,13 @@ from openpyxl import Workbook, load_workbook
 
 from config import IMPORTED_FILES_DIR, UPLOAD_DIR
 from services.formatting import format_date_ru, parse_available_until
+from services.test_access import (
+    editable_tests,
+    get_owner,
+    get_test_access,
+    get_user_display_name,
+    is_manager,
+)
 from services.test_settings import can_user_access_test, get_attempt_limit_status, get_test_settings
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -42,13 +49,20 @@ def get_uploaded_files(user_info: Optional[Dict[str, Any]] = None):
     """Получает список загруженных файлов"""
     files = []
     login = user_info.get("login") if user_info else None
-    for file_path in glob.glob(os.path.join(UPLOAD_DIR, "*.xlsx")):
+    manager = is_manager(user_info)
+    # Преподаватель видит только свои тесты и тесты, к которым ему открыли доступ
+    visible_to_manager = editable_tests(login) if manager else set()
+    for file_path in sorted(glob.glob(os.path.join(UPLOAD_DIR, "*.xlsx")), key=lambda p: os.path.basename(p).lower()):
         filename = os.path.basename(file_path)
         file_size = os.path.getsize(file_path)
+        if manager and filename not in visible_to_manager:
+            continue
         settings = get_test_settings(filename)
         has_access, _ = can_user_access_test(settings, user_info)
         if not has_access:
             continue
+        access = get_test_access(user_info, filename) if manager else {"owner": False, "edit": False}
+        owner_login = get_owner(filename) if manager and not access["owner"] else None
         attempt_limit = get_attempt_limit_status(settings, login, filename)
         available_until_dt = parse_available_until(settings.get("available_until"))
         is_available = True
@@ -75,7 +89,10 @@ def get_uploaded_files(user_info: Optional[Dict[str, Any]] = None):
             "attempts_left": attempt_limit["attempts_left"],
             "is_available": is_available,
             "is_limit_expired": is_limit_expired,
-            "unavailable_reason": unavailable_reason
+            "unavailable_reason": unavailable_reason,
+            "is_owner": access["owner"],
+            "can_edit": access["edit"],
+            "owner_name": get_user_display_name(owner_login) if owner_login else ""
         })
     return files
 
