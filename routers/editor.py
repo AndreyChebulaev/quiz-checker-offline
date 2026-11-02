@@ -309,8 +309,15 @@ async def save_edit(
             )
     else:
         safe_filename = normalize_excel_filename(filename)
-        if not get_saved_file_path(safe_filename).exists():
+        # Сохранять можно опубликованный тест или файл, только что импортированный
+        # в редактор (он лежит в uploaded_files_imports и публикуется при сохранении)
+        is_published = get_saved_file_path(safe_filename).exists()
+        is_imported = get_imported_file_path(safe_filename).exists()
+        if not (is_published or is_imported):
             return JSONResponse(content={"error": "Редактируемый тест не найден"}, status_code=404)
+        if safe_filename.lower().endswith(".xls"):
+            # Сохраняем всегда в .xlsx: список тестов показывает только такие файлы
+            safe_filename = safe_filename[:-4] + ".xlsx"
     file_path = get_saved_file_path(safe_filename)
 
     try:

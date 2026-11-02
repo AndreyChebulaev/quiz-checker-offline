@@ -58,6 +58,23 @@ check("студент не может скачать файл теста", s.get
 check("студент не может удалить файл", s.post("/delete_file", data={"filename": "Новый.xlsx"}).status_code == 403)
 r = t.post("/delete_file", data={"filename": "Новый.xlsx"}); check("преподаватель удаляет файл", not os.path.exists("uploaded_files/Новый.xlsx"), r.status_code)
 check("путь с ../ отклоняется", t.get("/download/..%2Fusers.db").status_code in (400, 404))
+
+# --- импорт теста из Excel и публикация через редактор ---
+import io as _io
+from openpyxl import Workbook as _WB
+_wb = _WB(); _ws = _wb.active
+_ws.append(["Что такое онтология?", '"формальное описание понятий и связей"'])
+_ws.append(["Что такое фрейм?", '"структура из слотов"'])
+_buf = _io.BytesIO(); _wb.save(_buf)
+r = t.post("/editor/upload", files={"file": ("Импорт.xlsx", _buf.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+check("импорт Excel открывает редактор", r.status_code == 200 and "онтология" in r.text, r.status_code)
+check("до сохранения импорт не опубликован", not os.path.exists("uploaded_files/Импорт.xlsx"))
+r = save(t, "Импорт.xlsx", ["Что такое онтология?", "Что такое фрейм?"], [["формальное описание понятий и связей"], ["структура из слотов"]])
+check("сохранение импортированного теста", r.status_code == 200 and os.path.exists("uploaded_files/Импорт.xlsx"), r.json())
+check("импортированный тест появился в списке", "Импорт.xlsx" in t.get("/select").text)
+r = t.post("/editor/upload", files={"file": ("Импорт.xlsx", _buf.getvalue(), "application/octet-stream")})
+r = save(t, "Импорт.xlsx", ["Что такое онтология?"], [["описание понятий"]])
+check("повторный импорт с тем же именем обновляет тест", r.status_code == 200)
 import openpyxl
 r = save(t, "Несуществующий.xlsx", ["q"], [["a"]])
 check("правка несуществующего теста отклоняется", r.status_code == 404)
