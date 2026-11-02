@@ -14,9 +14,11 @@ from services.test_access import (
     get_teacher_shares,
     get_test_access,
     get_user_display_name,
+    list_managers,
     parse_teacher_shares,
     save_teacher_shares,
     set_owner,
+    transfer_owner,
 )
 from services.test_files import (
     NEW_TEST_PLACEHOLDER,
@@ -44,11 +46,16 @@ def teacher_access_context(filename: str, user_info: dict) -> dict:
     """Кто владелец теста и кому открыт доступ — для блока «Доступ преподавателей»."""
     is_published = filename != NEW_TEST_PLACEHOLDER and get_saved_file_path(filename).exists()
     owner = (get_owner(filename) if is_published else None) or user_info["login"]
-    is_owner = owner == user_info["login"]
+    is_admin = user_info.get("user_type") == "admin"
+    can_manage = owner == user_info["login"] or is_admin
     return {
-        "is_test_owner": is_owner,
+        "is_test_owner": owner == user_info["login"],
+        "can_manage_test": can_manage,
+        "is_admin_editor": is_admin,
+        "test_owner_login": owner,
         "test_owner_name": get_user_display_name(owner),
-        "teacher_shares": get_teacher_shares(filename if is_published else None, owner) if is_owner else [],
+        "teacher_shares": get_teacher_shares(filename if is_published else None, owner) if can_manage else [],
+        "owner_candidates": list_managers() if is_admin else [],
     }
 
 
@@ -285,7 +292,8 @@ async def save_edit(
     source: str = Form(""),
     threshold: str = Form(""),
     review_margin: str = Form(""),
-    teacher_shares: str = Form("")
+    teacher_shares: str = Form(""),
+    new_owner: str = Form("")
 ):
     user_login = get_user_from_session(request)
     if not user_login:
@@ -369,7 +377,7 @@ async def save_edit(
         )
     renamed_from = original_filename if source == "published" and safe_filename != original_filename else None
     if renamed_from and safe_filename.casefold() != original_filename.casefold() \
-            and not get_test_access(user_info, original_filename)["owner"]:
+            and not get_test_access(user_info, original_filename)["manage"]:
         return JSONResponse(content={"error": "Переименовать тест может только его владелец"}, status_code=403)
     file_path = get_saved_file_path(safe_filename)
 
@@ -389,8 +397,11 @@ async def save_edit(
         set_scoring_settings(safe_filename, scoring_settings["threshold"], scoring_settings["review_margin"])
         if not get_owner(safe_filename):
             set_owner(safe_filename, user_login)  # новый тест принадлежит тому, кто его создал
-        if shares is not None and get_test_access(user_info, safe_filename)["owner"]:
-            save_teacher_shares(safe_filename, user_login, shares)
+        # Передать тест другому преподавателю может только администратор
+        if new_owner and user_info.get("user_type") == "admin" and new_owner != get_owner(safe_filename):
+            transfer_owner(safe_filename, new_owner)
+        if shares is not None and get_test_access(user_info, safe_filename)["manage"]:
+            save_teacher_shares(safe_filename, get_owner(safe_filename), shares)
 
         # Возвращаем JSON ответ для асинхронного запроса
         return JSONResponse(

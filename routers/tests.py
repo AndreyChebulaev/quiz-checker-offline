@@ -1,6 +1,7 @@
 """Список тестов, загрузка, скачивание и удаление файлов, старт теста."""
 import os
 from datetime import datetime
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -11,12 +12,19 @@ from routers.common import render_select_with_error
 from services.ai_backend import ai_service
 from services.formatting import parse_available_until
 from services.quiz import load_quiz_bank, quiz_sessions
+from services.test_access import (
+    can_edit_test,
+    get_owner,
+    get_test_access,
+    is_manager,
+    set_admin_shows_all,
+    set_owner,
+)
 from services.test_files import (
     get_uploaded_file_path,
     get_uploaded_files,
     validate_uploaded_excel_filename,
 )
-from services.test_access import can_edit_test, get_owner, get_test_access, is_manager, set_owner
 from services.test_settings import (
     can_user_access_test,
     get_attempt_limit_status,
@@ -258,7 +266,7 @@ async def delete_file(request: Request, filename: str = Form(...)):
         access = get_test_access(user_info, safe_filename)
         if not access["edit"]:
             return JSONResponse({"status": "error", "message": "Файл не найден"})
-        if not access["owner"]:
+        if not access["manage"]:
             return JSONResponse({"status": "error", "message": "Удалить тест может только его владелец"}, status_code=403)
         if os.path.exists(file_path):
             os.remove(file_path)
@@ -283,3 +291,22 @@ def redirect_to_editor(request: Request):
         return RedirectResponse(url="/select", status_code=303)
     
     return RedirectResponse(url="/editor", status_code=307)
+
+
+@router.get("/scope")
+def set_admin_scope(request: Request, show: str = "mine"):
+    """Переключатель администратора «Мои тесты / Все тесты» (влияет на списки)."""
+    login = get_user_from_session(request)
+    if not login:
+        return RedirectResponse(url="/", status_code=303)
+    user_info = get_user_full_info(login)
+    if user_info and user_info.get("user_type") == "admin":
+        set_admin_shows_all(login, show == "all")
+    # Возвращаемся на ту же страницу (только адреса этого сайта)
+    referer = urlparse(request.headers.get("referer", ""))
+    target = referer.path or "/select"
+    if not target.startswith("/") or target.startswith("//") or target.startswith("/scope"):
+        target = "/select"
+    if referer.query:
+        target += "?" + referer.query
+    return RedirectResponse(url=target, status_code=303)

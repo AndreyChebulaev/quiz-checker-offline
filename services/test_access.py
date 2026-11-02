@@ -7,7 +7,10 @@
   доступ на редактирование;
 - результаты теста (и проверка спорных ответов) видны владельцу и тем, кому открыт доступ
   к результатам. Доступ к тесту и к результатам выдаются независимо;
-- переименовать, удалить тест и настроить доступ может только владелец.
+- переименовать, удалить тест и настроить доступ может только владелец;
+- администратор может всё: открыть любой тест и любые результаты, настроить доступ,
+  передать тест другому преподавателю (например, если владелец уволился). В списках он
+  по умолчанию видит только своё и переключается на «Все тесты» в меню.
 Студентов это не касается: их доступ задаётся списками студентов и групп в настройках теста.
 """
 import glob
@@ -36,6 +39,10 @@ def init_access_tables() -> None:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(test_settings)").fetchall()}
         if "owner_login" not in columns:
             conn.execute("ALTER TABLE test_settings ADD COLUMN owner_login TEXT")
+        user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "show_all_tests" not in user_columns:
+            # Настройка администратора: показывать в списках все тесты, а не только свои
+            conn.execute("ALTER TABLE users ADD COLUMN show_all_tests INTEGER NOT NULL DEFAULT 0")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS test_shares (
@@ -84,22 +91,27 @@ def set_owner(filename: str, login: str) -> None:
 
 # ------------------------------------------------------------------ проверки прав
 def get_test_access(user_info: Optional[Dict[str, Any]], filename: str) -> Dict[str, bool]:
-    """Права пользователя-преподавателя на тест: owner, edit, results."""
-    none = {"owner": False, "edit": False, "results": False}
+    """Права пользователя на тест.
+
+    owner — он владелец; edit — видит и редактирует; results — видит результаты и проверяет;
+    manage — может переименовать, удалить, настроить доступ (владелец или администратор).
+    """
+    none = {"owner": False, "edit": False, "results": False, "manage": False}
     if not is_manager(user_info) or not filename:
         return none
     login = user_info["login"]
     with _connect() as conn:
         owner = conn.execute("SELECT owner_login FROM test_settings WHERE filename = ?", (filename,)).fetchone()
-        if owner and owner[0] == login:
-            return {"owner": True, "edit": True, "results": True}
+        is_owner = bool(owner and owner[0] == login)
+        if is_owner or user_info.get("user_type") == "admin":
+            return {"owner": is_owner, "edit": True, "results": True, "manage": True}
         share = conn.execute(
             "SELECT can_edit, can_view_results FROM test_shares WHERE filename = ? AND teacher_login = ?",
             (filename, login),
         ).fetchone()
     if not share:
         return none
-    return {"owner": False, "edit": bool(share[0]), "results": bool(share[1])}
+    return {"owner": False, "edit": bool(share[0]), "results": bool(share[1]), "manage": False}
 
 
 def can_edit_test(user_info: Optional[Dict[str, Any]], filename: str) -> bool:
@@ -110,8 +122,25 @@ def can_view_test_results(user_info: Optional[Dict[str, Any]], filename: str) ->
     return get_test_access(user_info, filename)["results"]
 
 
+def admin_shows_all(login: Optional[str]) -> bool:
+    """Администратор включил режим «Все тесты»."""
+    if not login:
+        return False
+    with _connect() as conn:
+        row = conn.execute("SELECT user_type, show_all_tests FROM users WHERE login = ?", (login,)).fetchone()
+    return bool(row and row["user_type"] == "admin" and row["show_all_tests"])
+
+
+def set_admin_shows_all(login: str, value: bool) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE users SET show_all_tests = ? WHERE login = ? AND user_type = 'admin'", (int(value), login))
+
+
 def _tests_where(login: str, flag: str) -> Set[str]:
     with _connect() as conn:
+        if admin_shows_all(login):
+            settings = conn.execute("SELECT filename FROM test_settings").fetchall()
+            return {r[0] for r in settings}
         owned = conn.execute("SELECT filename FROM test_settings WHERE owner_login = ?", (login,)).fetchall()
         shared = conn.execute(
             f"SELECT filename FROM test_shares WHERE teacher_login = ? AND {flag} = 1", (login,)
@@ -142,6 +171,27 @@ def get_user_display_name(login: Optional[str]) -> str:
             "SELECT login, last_name, first_name, middle_name FROM users WHERE login = ?", (login,)
         ).fetchone()
     return _full_name(row) if row else login
+
+
+def list_managers() -> List[Dict[str, str]]:
+    """Преподаватели и администраторы — кандидаты в владельцы теста."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT login, last_name, first_name, middle_name, user_type FROM users "
+            "WHERE user_type IN ('teacher', 'admin') ORDER BY last_name, first_name"
+        ).fetchall()
+    return [{"login": r["login"], "full_name": _full_name(r),
+             "role": "администратор" if r["user_type"] == "admin" else "преподаватель"} for r in rows]
+
+
+def transfer_owner(filename: str, new_owner: str) -> bool:
+    """Передать тест другому преподавателю (делает администратор)."""
+    if new_owner not in {m["login"] for m in list_managers()}:
+        return False
+    set_owner(filename, new_owner)
+    with _connect() as conn:
+        conn.execute("DELETE FROM test_shares WHERE filename = ? AND teacher_login = ?", (filename, new_owner))
+    return True
 
 
 def get_teacher_shares(filename: Optional[str], owner_login: str) -> List[Dict[str, Any]]:

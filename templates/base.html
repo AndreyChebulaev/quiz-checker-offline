@@ -69,6 +69,27 @@
         .nav-link:hover {
             background-color: #34495e;
         }
+
+        /* Переключатель администратора «Мои / Все тесты» */
+        .scope-switch {
+            display: inline-flex;
+            align-self: center;
+            border: 1px solid #5d6d7e;
+            border-radius: 6px;
+            overflow: hidden;
+            font-size: 13px;
+        }
+        .scope-switch a {
+            color: #d5dbe1;
+            text-decoration: none;
+            padding: 4px 10px;
+            white-space: nowrap;
+        }
+        .scope-switch a.is-active {
+            background: #3498db;
+            color: #fff;
+            font-weight: 600;
+        }
         
         /* ========= ВСЕ ОСТАЛЬНЫЕ СТИЛИ - ПОЛНОСТЬЮ ИЗ ПЕРВОГО ФАЙЛА ========= */
         
@@ -580,6 +601,9 @@
                 {% endif %}
                 {% if user_permissions and user_permissions.can_manage_users %}
                 <li><a href="/v2" class="nav-link" title="Управление пользователями">Пользователи</a></li>
+                <li class="scope-switch" title="Какие тесты, результаты и ответы на проверку показывать">
+                    <a href="/scope?show=mine" class="{% if not admin_show_all %}is-active{% endif %}">Мои</a><a href="/scope?show=all" class="{% if admin_show_all %}is-active{% endif %}">Все тесты</a>
+                </li>
                 {% endif %}
             </ul>
             {% if user_info %}

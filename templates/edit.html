@@ -365,34 +365,74 @@
         <small class="field-hint">Если не выбраны ни студенты, ни группы, тест доступен всем студентам.</small>
     </div>
 
-    <div class="settings-block teacher-access">
+    <div class="settings-block teacher-access test-settings">
         <div class="question-header">
             <h3>Доступ преподавателей</h3>
         </div>
-        {% if is_test_owner %}
-        <p class="field-hint" style="margin-top:0">
-            Тест видите только вы. Отметьте коллег, которым нужно открыть тест для редактирования
-            или его результаты (просмотр и проверка спорных ответов). Удалить и переименовать тест может только владелец.
-        </p>
-        {% if teacher_shares %}
-        <input type="text" id="teacher_search" class="access-search" placeholder="Поиск преподавателя">
-        <div class="teacher-share-list" id="teacher_share_list">
-            <div class="teacher-share-row teacher-share-head">
-                <span>Преподаватель</span><span>Тест</span><span>Результаты</span>
+        {% if can_manage_test %}
+        {% if is_admin_editor %}
+        <div class="settings-grid settings-grid-2">
+            <div class="settings-field">
+                <label for="test_owner">Владелец теста</label>
+                <select id="test_owner" data-initial="{{ test_owner_login }}">
+                    {% for m in owner_candidates %}
+                    <option value="{{ m.login }}" {% if m.login == test_owner_login %}selected{% endif %}>{{ m.full_name }}{% if m.role == 'администратор' %} (администратор){% endif %}</option>
+                    {% endfor %}
+                </select>
+                <small class="field-hint">Администратор может передать тест другому преподавателю, например если владелец больше не работает.</small>
             </div>
-            {% for t in teacher_shares %}
-            <label class="teacher-share-row" data-login="{{ t.login }}" data-search="{{ (t.full_name ~ ' ' ~ t.login)|lower }}">
-                <span>{{ t.full_name }} <small>({{ t.login }}, {{ t.role }})</small></span>
-                <span><input type="checkbox" class="share-edit" {% if t.can_edit %}checked{% endif %} title="Видеть и редактировать тест"></span>
-                <span><input type="checkbox" class="share-results" {% if t.can_view_results %}checked{% endif %} title="Видеть результаты и проверять ответы"></span>
-            </label>
-            {% endfor %}
         </div>
-        {% else %}
-        <p class="field-hint">Других преподавателей в системе пока нет.</p>
         {% endif %}
+        <div class="settings-grid settings-grid-wide">
+            <div class="form-group">
+                <label>Могут редактировать тест</label>
+                <div class="access-dropdown">
+                    <input type="text" id="share_edit_display" class="access-display" placeholder="{{ 'Никому — только вы' if is_test_owner else 'Никому — только владелец' }}" readonly>
+                    <div class="access-panel" id="share_edit_panel">
+                        <input type="text" id="share_edit_search" class="access-search" placeholder="Поиск по ФИО">
+                        <div class="access-list" id="share_edit_list">
+                            {% for t in teacher_shares %}
+                            <label class="access-item">
+                                <input type="checkbox" class="share_edit-checkbox" value="{{ t.login }}"
+                                       data-label="{{ t.full_name }}" {% if t.can_edit %}checked{% endif %}>
+                                <span>{{ t.full_name }}{% if t.role == 'администратор' %} <small>(администратор)</small>{% endif %}</span>
+                            </label>
+                            {% else %}
+                            <div class="access-empty">Других преподавателей в системе нет</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                <small class="field-hint">Видят тест в своём списке, меняют вопросы и настройки.</small>
+            </div>
+            <div class="form-group">
+                <label>Видят результаты</label>
+                <div class="access-dropdown">
+                    <input type="text" id="share_results_display" class="access-display" placeholder="{{ 'Никому — только вы' if is_test_owner else 'Никому — только владелец' }}" readonly>
+                    <div class="access-panel" id="share_results_panel">
+                        <input type="text" id="share_results_search" class="access-search" placeholder="Поиск по ФИО">
+                        <div class="access-list" id="share_results_list">
+                            {% for t in teacher_shares %}
+                            <label class="access-item">
+                                <input type="checkbox" class="share_results-checkbox" value="{{ t.login }}"
+                                       data-label="{{ t.full_name }}" {% if t.can_view_results %}checked{% endif %}>
+                                <span>{{ t.full_name }}{% if t.role == 'администратор' %} <small>(администратор)</small>{% endif %}</span>
+                            </label>
+                            {% else %}
+                            <div class="access-empty">Других преподавателей в системе нет</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                <small class="field-hint">Смотрят результаты студентов и проверяют спорные ответы.</small>
+            </div>
+        </div>
+        <small class="field-hint">
+            Если никого не выбрать, тест и его результаты видит только владелец (и администратор).
+            Переименовать, удалить тест и изменить доступ может только владелец или администратор.
+        </small>
         {% else %}
-        <p class="field-hint" style="margin-top:0">
+        <p class="field-hint" style="margin:0">
             Владелец теста: <strong>{{ test_owner_name }}</strong>. Вам открыт доступ на редактирование;
             настраивать доступ, переименовывать и удалять тест может только владелец.
         </p>
@@ -476,16 +516,11 @@
     .settings-field label { font-weight: 600; font-size: 14px; color: #2c3e50; }
     .settings-field input { width: 100%; box-sizing: border-box; padding: 9px 10px; }
     .field-hint { display: block; color: #7f8c8d; font-size: 12px; line-height: 1.35; }
-    .teacher-share-list { border: 1px solid #e1e8ed; border-radius: 8px; max-height: 260px; overflow-y: auto; margin-top: 8px; }
-    .teacher-share-row {
-        display: grid; grid-template-columns: 1fr 90px 100px; align-items: center;
-        padding: 7px 12px; border-bottom: 1px solid #f0f3f6; cursor: pointer; margin: 0; font-weight: normal;
-    }
-    .teacher-share-row:last-child { border-bottom: none; }
-    .teacher-share-row span:not(:first-child) { text-align: center; }
-    .teacher-share-row small { color: #7f8c8d; }
-    .teacher-share-head { position: sticky; top: 0; background: #f7f9fb; font-weight: 600; font-size: 13px; cursor: default; }
-    .teacher-access #teacher_search { margin-top: 4px; }
+    .settings-field select { width: 100%; padding: 9px 10px; border: 1px solid #ddd; border-radius: 6px; background: #fff; }
+    /* Заголовок блока ближе к линии и к полям */
+    .new-test-edit-page .settings-block .question-header { margin-bottom: 12px; padding-bottom: 6px; }
+    .test-settings .access-display { padding: 9px 36px 9px 10px; }
+    .teacher-access { margin-top: 18px; }
 </style>
 <style>
     .container .actions.editor-sticky-actions {
@@ -724,16 +759,23 @@ document.addEventListener('click', () => {
     });
 });
 
-// Поиск преподавателя в блоке доступа
-const teacherSearch = document.getElementById('teacher_search');
-if (teacherSearch) {
-    teacherSearch.addEventListener('input', () => {
-        const q = teacherSearch.value.trim().toLowerCase();
-        document.querySelectorAll('#teacher_share_list .teacher-share-row[data-login]').forEach((row) => {
-            row.style.display = row.dataset.search.includes(q) ? '' : 'none';
-        });
+// Выпадающие списки преподавателей устроены так же, как списки студентов и групп
+['share_edit', 'share_results'].forEach((key) => {
+    const display = document.getElementById(`${key}_display`);
+    const panel = document.getElementById(`${key}_panel`);
+    const search = document.getElementById(`${key}_search`);
+    if (!display || !panel) return;
+    display.addEventListener('click', (event) => {
+        event.stopPropagation();
+        togglePanel(`${key}_panel`);
     });
-}
+    panel.addEventListener('click', (event) => event.stopPropagation());
+    document.querySelectorAll(`.${key}-checkbox`).forEach((checkbox) => {
+        checkbox.addEventListener('change', () => updateAccessDisplay(`${key}_display`, `.${key}-checkbox`));
+    });
+    if (search) search.addEventListener('input', () => filterAccessList(`${key}_search`, `${key}_list`));
+    updateAccessDisplay(`${key}_display`, `.${key}-checkbox`);
+});
 
 // --- Несохранённые изменения и Ctrl+S ---
 const mainForm = document.getElementById('main-form');
@@ -800,14 +842,18 @@ mainForm.addEventListener('submit', function(e) {
     formData.append('max_attempts', document.getElementById('max_attempts').value.trim());
     formData.append('available_until', document.getElementById('available_until').value);
     formData.append('threshold', document.getElementById('threshold').value.trim());
-    const shareList = document.getElementById('teacher_share_list');
-    if (shareList) {
-        const shares = [...shareList.querySelectorAll('.teacher-share-row[data-login]')].map((row) => ({
-            login: row.dataset.login,
-            can_edit: row.querySelector('.share-edit').checked,
-            can_view_results: row.querySelector('.share-results').checked,
-        })).filter((s) => s.can_edit || s.can_view_results);
+    if (document.getElementById('share_edit_list')) {
+        const checkedLogins = (key) => new Set(Array.from(document.querySelectorAll(`.${key}-checkbox:checked`)).map((c) => c.value));
+        const editLogins = checkedLogins('share_edit');
+        const resultLogins = checkedLogins('share_results');
+        const shares = [...new Set([...editLogins, ...resultLogins])].map((login) => ({
+            login, can_edit: editLogins.has(login), can_view_results: resultLogins.has(login),
+        }));
         formData.append('teacher_shares', JSON.stringify(shares));
+    }
+    const ownerSelect = document.getElementById('test_owner');
+    if (ownerSelect && ownerSelect.value !== ownerSelect.dataset.initial) {
+        formData.append('new_owner', ownerSelect.value);
     }
     formData.append('review_margin', document.getElementById('review_margin').value.trim());
     formData.append('allowed_students', getCheckedValues('.allowed-student-checkbox'));

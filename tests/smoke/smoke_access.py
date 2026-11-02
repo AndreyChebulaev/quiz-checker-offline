@@ -68,7 +68,8 @@ aid = db("select id from answer_results where result_id=? and auto_verdict='revi
 check("второй не может проверить чужой ответ", t2.post(f"/review/answers/{aid}", data={"verdict": "correct"}).status_code == 404)
 
 page = t1.get(f"/editor/edit/{F}").text
-check("владелец видит блок доступа с коллегами", 'id="teacher_share_list"' in page and T2 in page)
+check("владелец видит выпадающие списки коллег", 'id="share_edit_list"' in page and 'id="share_results_list"' in page and f'value="{T2}"' in page)
+check("логины коллег не показываются", f"({T2}," not in page and f">{T2}<" not in page)
 # открываем второму только результаты
 r = save(t1, F, source="published", teacher_shares=json.dumps([{"login": T2, "can_edit": False, "can_view_results": True}]))
 check("владелец открыл доступ к результатам", r.status_code == 200 and db("select can_edit, can_view_results from test_shares where filename=? and teacher_login=?", F, T2) == [(0, 1)])
@@ -79,7 +80,7 @@ check("но тест в списке и редакторе не виден", "Т
 save(t1, F, source="published", teacher_shares=json.dumps([{"login": T2, "can_edit": True, "can_view_results": False}]))
 check("второй видит тест с пометкой владельца", "Владелец:" in t2.get("/select").text and "Тест первого" in t2.get("/select").text)
 p2 = t2.get(f"/editor/edit/{F}").text
-check("второй открывает редактор, блока настройки доступа нет", "Владелец теста:" in p2 and 'id="teacher_share_list"' not in p2)
+check("второй открывает редактор, блока настройки доступа нет", "Владелец теста:" in p2 and 'id="share_edit_list"' not in p2)
 r = save(t2, F, source="published", teacher_shares=json.dumps([{"login": T2, "can_edit": True, "can_view_results": True}]))
 check("второй сохраняет правки", r.status_code == 200)
 check("но не может выдать себе доступ к результатам", db("select can_view_results from test_shares where filename=? and teacher_login=?", F, T2) == [(0,)])
@@ -101,4 +102,27 @@ check("студент по-прежнему видит тест", "Тест пе
 r = t1.post("/delete_file", data={"filename": F2})
 check("владелец удаляет тест", r.json()["status"] == "success" and not os.path.exists(f"uploaded_files/{F2}"))
 check("после удаления результаты у владельца остались", "Тест первого v2" in t1.get("/results").text)
+
+# --- администратор ---
+F3 = "Тест для админа.xlsx"
+save(t1, "new_file.xlsx", test_name="Тест для админа")
+check("в режиме «Мои» админ не видит чужие тесты", "Тест для админа" not in adm.get("/select").text)
+r = adm.get("/scope?show=all", headers={"referer": "http://testserver/results?q=x"}, follow_redirects=False)
+check("переключатель возвращает на ту же страницу", r.status_code == 303 and r.headers["location"] == "/results?q=x", r.headers.get("location"))
+check("в режиме «Все» админ видит чужой тест с владельцем", "Тест для админа" in adm.get("/select").text and "Владелец:" in adm.get("/select").text)
+check("переключатель отмечен", 'href="/scope?show=all" class="is-active"' in adm.get("/select").text)
+check("админ видит чужие результаты", "Тест первого" in adm.get("/results").text)
+check("админ открывает чужой тест в редакторе", adm.get(f"/editor/edit/{F3}").status_code == 200)
+pa = adm.get(f"/editor/edit/{F3}").text
+check("у админа есть выбор владельца", 'id="test_owner"' in pa)
+r = save(adm, F3, source="published", new_owner=T2)
+check("админ передал тест другому преподавателю", r.status_code == 200 and db("select owner_login from test_settings where filename=?", F3) == [(T2,)], r.json())
+check("новый владелец видит тест, старый — нет", "Тест для админа" in t2.get("/select").text and "Тест для админа" not in t1.get("/select").text)
+check("преподаватель не может передать тест", (save(t2, F3, source="published", new_owner=T1), db("select owner_login from test_settings where filename=?", F3))[1] == [(T2,)])
+check("студент не может включить «Все тесты»", (st.get("/scope?show=all"), db("select show_all_tests from users where login=?", STUD))[1] == [(0,)])
+check("переключатель студенту не показывается", 'class="scope-switch"' not in st.get("/select").text)
+check("чужой referer игнорируется", adm.get("/scope?show=mine", headers={"referer": "http://evil.example//evil"}, follow_redirects=False).headers["location"] in ("/select", "//evil") and
+      not adm.get("/scope?show=mine", headers={"referer": "http://evil.example//evil"}, follow_redirects=False).headers["location"].startswith("//"))
+check("в режиме «Мои» снова только своё", "Тест для админа" not in adm.get("/select").text)
+check("админ может удалить чужой тест", adm.post("/delete_file", data={"filename": F3}).json()["status"] == "success")
 print("ИТОГ:", "ВСЁ ОК" if ok else "ЕСТЬ ОШИБКИ")

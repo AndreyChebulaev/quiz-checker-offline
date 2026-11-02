@@ -61,8 +61,10 @@ def get_uploaded_files(user_info: Optional[Dict[str, Any]] = None):
         has_access, _ = can_user_access_test(settings, user_info)
         if not has_access:
             continue
-        access = get_test_access(user_info, filename) if manager else {"owner": False, "edit": False}
-        owner_login = get_owner(filename) if manager and not access["owner"] else None
+        access = get_test_access(user_info, filename) if manager else {"manage": False, "edit": False}
+        owner_login = get_owner(filename) if manager else None
+        if owner_login == login:
+            owner_login = None  # свой тест — владельца не показываем
         attempt_limit = get_attempt_limit_status(settings, login, filename)
         available_until_dt = parse_available_until(settings.get("available_until"))
         is_available = True
@@ -90,7 +92,7 @@ def get_uploaded_files(user_info: Optional[Dict[str, Any]] = None):
             "is_available": is_available,
             "is_limit_expired": is_limit_expired,
             "unavailable_reason": unavailable_reason,
-            "is_owner": access["owner"],
+            "is_owner": access["manage"],
             "can_edit": access["edit"],
             "owner_name": get_user_display_name(owner_login) if owner_login else ""
         })
