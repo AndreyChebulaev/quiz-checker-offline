@@ -1,4 +1,6 @@
-# Для эксперимента (experiments/run_experiment.py) и тестов
+# Для тестов (pytest) и эксперимента (experiments/run_experiment.py)
 -r requirements.txt
+pytest>=8
+httpx>=0.27
 scikit-learn==1.8.0
 matplotlib>=3.8

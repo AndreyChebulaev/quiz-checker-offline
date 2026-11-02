@@ -37,3 +37,12 @@ desktop.ini
 
 # Пароль первого администратора (создаётся автоматически)
 first_admin_credentials.txt
+
+# Демо-режим (scripts/load_demo_data.py)
+demo.db
+demo_files/
+demo_credentials.txt
+
+# Рабочие данные: тесты, загруженные через сайт
+uploaded_files/
+uploaded_files_imports/

@@ -8,8 +8,8 @@ BASE_DIR = Path(__file__).resolve().parent
 DATABASE_PATH = os.getenv("QUIZ_DATABASE_PATH", "users.db")
 
 # Каталоги с файлами тестов
-UPLOAD_DIR = "uploaded_files"                 # опубликованные тесты
-IMPORTED_FILES_DIR = "uploaded_files_imports"  # файлы, импортированные в редактор
+UPLOAD_DIR = os.getenv("QUIZ_UPLOAD_DIR", "uploaded_files")                     # опубликованные тесты
+IMPORTED_FILES_DIR = os.getenv("QUIZ_IMPORT_DIR", "uploaded_files_imports")      # импорт в редактор
 
 TEMPLATES_DIR = "templates"
 STATIC_DIR = "static"

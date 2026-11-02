@@ -44,7 +44,8 @@ def ensure_admin_exists(cursor) -> None:
         with open("first_admin_credentials.txt", "w", encoding="utf-8") as f:
             f.write(f"Логин: {login}\nПароль: {password}\n"
                     "Смените пароль после первого входа и удалите этот файл.\n")
-    print(f"[security] Создан администратор '{login}'. Данные для входа: first_admin_credentials.txt")
+    where = "пароль из QUIZ_ADMIN_PASSWORD" if os.getenv("QUIZ_ADMIN_PASSWORD") else "данные для входа в first_admin_credentials.txt"
+    print(f"[security] Создан администратор '{login}', {where}")
 
 
 def migrate_plaintext_passwords(backup_dir: str = "_backup") -> int:
