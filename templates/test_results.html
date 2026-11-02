@@ -255,12 +255,14 @@
             display: block;
         }
     }
+.results-header .scope-bar { justify-content: flex-start; margin: 6px 0 4px; }
 </style>
 
 <div class="results-wrapper">
     <div class="results-header">
         <div>
             <h2>Результаты тестов</h2>
+            {% include "_scope_switch.html" %}
             {% if show_user_column %}
             <p class="results-subtitle">Последние попытки всех пользователей: {{ results_count }}</p>
             {% else %}

@@ -7,6 +7,7 @@ os.makedirs(os.path.join(WORK, "local_models/rubert-tiny2"), exist_ok=True)
 os.chdir(WORK); sys.path.insert(0, WORK)
 import sqlite3
 pre = sqlite3.connect("users.db"); pre.execute("update users set password = 'pw_' || login")
+pre.execute("update users set show_all_tests = 0") if "show_all_tests" in [r[1] for r in pre.execute("pragma table_info(users)")] else None
 pre.execute("delete from test_shares") if pre.execute("select name from sqlite_master where name='test_shares'").fetchone() else None
 pre.commit()
 users = {}
@@ -125,4 +126,28 @@ check("чужой referer игнорируется", adm.get("/scope?show=mine",
       not adm.get("/scope?show=mine", headers={"referer": "http://evil.example//evil"}, follow_redirects=False).headers["location"].startswith("//"))
 check("в режиме «Мои» снова только своё", "Тест для админа" not in adm.get("/select").text)
 check("админ может удалить чужой тест", adm.post("/delete_file", data={"filename": F3}).json()["status"] == "success")
+
+# --- закрыть тест для всех студентов ---
+F4 = "Черновик.xlsx"
+save(t1, "new_file.xlsx", test_name="Черновик")
+check("новый тест открыт студентам", "Черновик" in st.get("/select").text)
+check("в редакторе переключатель включён", 'id="students_open" checked' in t1.get(f"/editor/edit/{F4}").text)
+r = save(t1, F4, source="published", students_closed="1")
+check("тест закрыт для студентов", r.status_code == 200 and db("select students_closed from test_settings where filename=?", F4) == [(1,)])
+check("студент не видит закрытый тест", "Черновик" not in st.get("/select").text)
+check("студент не может начать закрытый тест", "закрыт преподавателем" in st.post("/select", data={"filename": F4}).text)
+check("владелец видит закрытый тест с пометкой", "Скрыт от студентов" in t1.get("/select").text)
+check("переключатель в редакторе выключен", 'id="students_open" checked' not in t1.get(f"/editor/edit/{F4}").text)
+save(t1, F4, source="published", teacher_shares=json.dumps([{"login": T2, "can_edit": True}]))
+check("закрытый тест виден преподавателю с доступом", "Черновик" in t2.get("/select").text)
+check("сохранение без поля не открывает тест", (save(t1, F4, source="published"), db("select students_closed from test_settings where filename=?", F4))[1] == [(1,)])
+save(t1, F4, source="published", students_closed="0")
+check("тест снова открыт студентам", "Черновик" in st.get("/select").text)
+save(t1, F4, source="published", students_closed="1", test_name="Черновик 2")
+check("закрытие сохраняется при переименовании", db("select students_closed from test_settings where filename='Черновик 2.xlsx'") == [(1,)])
+check("переключатель «Мои/Все» не в шапке", 'class="scope-switch"' not in t1.get("/select").text)
+adm.get("/scope?show=mine")
+check("переключатель у админа на списке, результатах и проверке",
+      all('class="scope-switch"' in adm.get(u).text for u in ["/select", "/results", "/review"]))
+check("но не в редакторе", 'class="scope-switch"' not in adm.get("/editor/create-new").text)
 print("ИТОГ:", "ВСЁ ОК" if ok else "ЕСТЬ ОШИБКИ")

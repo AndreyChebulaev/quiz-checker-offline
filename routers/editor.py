@@ -35,6 +35,7 @@ from services.test_settings import (
     get_test_settings_for_form,
     parse_scoring_settings,
     rename_test_records,
+    set_closed_for_students,
     set_scoring_settings,
     upsert_test_settings,
 )
@@ -293,7 +294,8 @@ async def save_edit(
     threshold: str = Form(""),
     review_margin: str = Form(""),
     teacher_shares: str = Form(""),
-    new_owner: str = Form("")
+    new_owner: str = Form(""),
+    students_closed: str = Form("")
 ):
     user_login = get_user_from_session(request)
     if not user_login:
@@ -395,6 +397,8 @@ async def save_edit(
             save_excel_file(str(file_path), data)
         upsert_test_settings(safe_filename, time_limit_minutes, max_attempts, available_until, allowed_students, allowed_groups)
         set_scoring_settings(safe_filename, scoring_settings["threshold"], scoring_settings["review_margin"])
+        if students_closed != "":
+            set_closed_for_students(safe_filename, students_closed in ("1", "true", "on"))
         if not get_owner(safe_filename):
             set_owner(safe_filename, user_login)  # новый тест принадлежит тому, кто его создал
         # Передать тест другому преподавателю может только администратор

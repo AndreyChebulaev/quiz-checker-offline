@@ -163,6 +163,9 @@ def create_tables():
         cursor.execute("ALTER TABLE test_settings ADD COLUMN threshold REAL")
     if "review_margin" not in settings_columns:
         cursor.execute("ALTER TABLE test_settings ADD COLUMN review_margin REAL")
+    if "students_closed" not in settings_columns:
+        # 1 — тест закрыт для всех студентов (виден только преподавателям с доступом)
+        cursor.execute("ALTER TABLE test_settings ADD COLUMN students_closed INTEGER NOT NULL DEFAULT 0")
 
     # Сколько ответов попытки ещё ждут проверки преподавателем
     cursor.execute("PRAGMA table_info(test_results)")

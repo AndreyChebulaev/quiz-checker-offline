@@ -48,6 +48,7 @@
         </div>
 
         <div class="users-section">
+            {% include "_scope_switch.html" %}
             <h3>Список тестов ({{ files|length }})</h3>
             <div class="users-list">
                 {% if files %}
@@ -70,6 +71,11 @@
                                     {% if file.available_until_display %}
                                     <span class="test-meta-chip">
                                         Дедлайн: {{ file.available_until_display }}
+                                    </span>
+                                    {% endif %}
+                                    {% if file.students_closed %}
+                                    <span class="test-meta-chip" style="background:#fdecea;color:#a93226;" title="Студенты не видят этот тест">
+                                        🔒 Скрыт от студентов
                                     </span>
                                     {% endif %}
                                     {% if file.owner_name %}

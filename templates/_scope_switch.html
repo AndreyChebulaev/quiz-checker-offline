@@ -1,0 +1,9 @@
+{# Переключатель «Мои / Все тесты» — только для администратора #}
+{% if user_info and user_info.user_type == 'admin' %}
+<div class="scope-bar">
+    <span>Показывать:</span>
+    <div class="scope-switch" title="Режим запоминается в профиле">
+        <a href="/scope?show=mine" class="{% if not admin_show_all %}is-active{% endif %}">Мои тесты</a><a href="/scope?show=all" class="{% if admin_show_all %}is-active{% endif %}">Все тесты</a>
+    </div>
+</div>
+{% endif %}

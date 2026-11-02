@@ -93,6 +93,7 @@ def get_uploaded_files(user_info: Optional[Dict[str, Any]] = None):
             "is_limit_expired": is_limit_expired,
             "unavailable_reason": unavailable_reason,
             "is_owner": access["manage"],
+            "students_closed": bool(settings.get("students_closed")),
             "can_edit": access["edit"],
             "owner_name": get_user_display_name(owner_login) if owner_login else ""
         })

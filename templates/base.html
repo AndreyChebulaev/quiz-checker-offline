@@ -70,21 +70,30 @@
             background-color: #34495e;
         }
 
-        /* Переключатель администратора «Мои / Все тесты» */
+        /* Переключатель администратора «Мои / Все тесты» (на страницах со списками) */
+        .scope-bar {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+            margin: 0 0 12px;
+            font-size: 14px;
+            color: #54606c;
+        }
         .scope-switch {
             display: inline-flex;
-            align-self: center;
-            border: 1px solid #5d6d7e;
-            border-radius: 6px;
+            border: 1px solid #c8d3de;
+            border-radius: 8px;
             overflow: hidden;
-            font-size: 13px;
+            background: #fff;
         }
         .scope-switch a {
-            color: #d5dbe1;
+            color: #2c3e50;
             text-decoration: none;
-            padding: 4px 10px;
+            padding: 6px 14px;
             white-space: nowrap;
         }
+        .scope-switch a + a { border-left: 1px solid #c8d3de; }
         .scope-switch a.is-active {
             background: #3498db;
             color: #fff;
@@ -601,9 +610,6 @@
                 {% endif %}
                 {% if user_permissions and user_permissions.can_manage_users %}
                 <li><a href="/v2" class="nav-link" title="Управление пользователями">Пользователи</a></li>
-                <li class="scope-switch" title="Какие тесты, результаты и ответы на проверку показывать">
-                    <a href="/scope?show=mine" class="{% if not admin_show_all %}is-active{% endif %}">Мои</a><a href="/scope?show=all" class="{% if admin_show_all %}is-active{% endif %}">Все тесты</a>
-                </li>
                 {% endif %}
             </ul>
             {% if user_info %}

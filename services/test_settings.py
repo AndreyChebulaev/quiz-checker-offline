@@ -49,7 +49,8 @@ def get_test_settings(filename: str) -> Dict[str, Any]:
         "available_until": available_until,
         "allowed_students": allowed_students,
         "allowed_groups": allowed_groups,
-        "max_attempts": max_attempts
+        "max_attempts": max_attempts,
+        "students_closed": is_closed_for_students(filename)
     }
 
 
@@ -132,6 +133,9 @@ def get_attempt_limit_status(settings: Dict[str, Any], login: Optional[str], fil
 
 
 def can_user_access_test(settings: Dict[str, Any], user_info: Optional[Dict[str, Any]]) -> (bool, str):
+    is_teacher = bool(user_info) and user_info.get("user_type") in ["teacher", "admin"]
+    if settings.get("students_closed") and not is_teacher:
+        return False, "Тест закрыт преподавателем."
     allowed_students = parse_access_list(settings.get("allowed_students"))
     allowed_groups = parse_access_list(settings.get("allowed_groups"))
 
@@ -199,6 +203,7 @@ def get_test_settings_for_form(filename: str):
         "allowed_groups": allowed_groups,
         "max_attempts": max_attempts,
         **{key: ("" if value is None else f"{value:g}") for key, value in get_scoring_settings(filename).items()},
+        "students_closed": is_closed_for_students(filename),
     }
 
 
@@ -371,6 +376,26 @@ def set_scoring_settings(filename: str, threshold: Optional[float], review_margi
             "UPDATE test_settings SET threshold = ?, review_margin = ?, updated_at = CURRENT_TIMESTAMP WHERE filename = ?",
             (threshold, review_margin, filename),
         )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def is_closed_for_students(filename: str) -> bool:
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        row = conn.execute("SELECT students_closed FROM test_settings WHERE filename = ?", (filename,)).fetchone()
+    finally:
+        conn.close()
+    return bool(row and row[0])
+
+
+def set_closed_for_students(filename: str, closed: bool) -> None:
+    """Закрыть тест для всех студентов (черновик) или открыть по спискам доступа."""
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        conn.execute("INSERT OR IGNORE INTO test_settings (filename) VALUES (?)", (filename,))
+        conn.execute("UPDATE test_settings SET students_closed = ? WHERE filename = ?", (int(closed), filename))
         conn.commit()
     finally:
         conn.close()

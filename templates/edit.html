@@ -223,7 +223,7 @@
     }
 </style>
 
-<h2>Редактирование вопросов и ответов</h2>
+<h2>{{ 'Создание теста' if filename == 'new_file.xlsx' else 'Редактирование теста' }}</h2>
 
 <div class="editor-toolbar">
     <div class="file-info editor-file-info">
@@ -261,20 +261,24 @@
     <input type="hidden" name="original_data" value="{{ original_data }}">
 
     <input type="hidden" name="source" value="{{ source or '' }}">
-    <div class="settings-block">
-        <div class="form-group">
-            <label for="test_name">Название теста:</label>
+
+    <section class="editor-section">
+        <div class="editor-section-header">
+            <h3>Основное</h3>
+        </div>
+        <div class="settings-field">
+            <label for="test_name">Название теста</label>
             <input type="text" id="test_name" maxlength="100" required
                    value="{{ '' if filename == 'new_file.xlsx' else filename.rsplit('.', 1)[0] }}"
                    placeholder="Например: Основы машинного обучения">
             {% if filename != "new_file.xlsx" %}
-            <small>Измените название, чтобы переименовать тест. История результатов и настройки сохранятся.</small>
+            <small class="field-hint">Измените название, чтобы переименовать тест. История результатов и настройки сохранятся.</small>
             {% endif %}
         </div>
-    </div>
+    </section>
 
-    <div class="settings-block test-settings">
-        <div class="question-header">
+    <section class="editor-section test-settings">
+        <div class="editor-section-header">
             <h3>Ограничения и проверка</h3>
         </div>
         <div class="settings-grid">
@@ -310,9 +314,21 @@
                 <small class="field-hint">Оценки от «порог − зона» до порога проверяет преподаватель. 0 — выключить.</small>
             </div>
         </div>
+    </section>
+
+    <section class="editor-section test-settings" id="students-access-section">
+        <div class="editor-section-header">
+            <h3>Доступ студентов</h3>
+            <label class="switch-toggle" title="Закрытый тест студенты не видят; его видят только преподаватели с доступом">
+                <input type="checkbox" id="students_open" {% if not test_settings.students_closed %}checked{% endif %}>
+                <span class="switch-slider"></span>
+                <span class="switch-label" id="students_open_label">{{ 'Открыт для студентов' if not test_settings.students_closed else 'Закрыт для студентов' }}</span>
+            </label>
+        </div>
+        <div class="students-access-body">
         <div class="settings-grid settings-grid-wide">
         <div class="form-group">
-            <label>Доступ для студентов:</label>
+            <label>Студенты</label>
             <div class="access-dropdown">
                 <input type="text" id="allowed_students_display" class="access-display" placeholder="Выберите студентов" readonly>
                 <div class="access-panel" id="allowed_students_panel">
@@ -337,7 +353,7 @@
             </div>
         </div>
         <div class="form-group">
-            <label>Доступ для групп:</label>
+            <label>Группы</label>
             <div class="access-dropdown">
                 <input type="text" id="allowed_groups_display" class="access-display" placeholder="Выберите группы" readonly>
                 <div class="access-panel" id="allowed_groups_panel">
@@ -362,11 +378,12 @@
             </div>
         </div>
         </div>
-        <small class="field-hint">Если не выбраны ни студенты, ни группы, тест доступен всем студентам.</small>
-    </div>
+        </div>
+        <small class="field-hint" id="students_access_hint"></small>
+    </section>
 
-    <div class="settings-block teacher-access test-settings">
-        <div class="question-header">
+    <section class="editor-section test-settings teacher-access">
+        <div class="editor-section-header">
             <h3>Доступ преподавателей</h3>
         </div>
         {% if can_manage_test %}
@@ -437,8 +454,14 @@
             настраивать доступ, переименовывать и удалять тест может только владелец.
         </p>
         {% endif %}
-    </div>
+    </section>
 
+    <section class="editor-section editor-questions-section">
+        <div class="editor-section-header">
+            <h3>Вопросы и эталонные ответы</h3>
+            <span class="section-badge" id="questions-count">{{ questions|length }}</span>
+        </div>
+        <p class="field-hint section-intro">Для вопроса можно задать несколько эталонных ответов — ответ студента сравнивается с ближайшим.</p>
     <div id="questions-container">
         {% for question in questions %}
         {% set answer_list = question.answers if question.answers else [''] %}
@@ -476,6 +499,7 @@
         </div>
         {% endfor %}
     </div>
+    </section>
 
     <!-- Панель действий закреплена внизу экрана: сохранить можно, не прокручивая до конца теста -->
     <div class="actions editor-sticky-actions">
@@ -517,10 +541,51 @@
     .settings-field input { width: 100%; box-sizing: border-box; padding: 9px 10px; }
     .field-hint { display: block; color: #7f8c8d; font-size: 12px; line-height: 1.35; }
     .settings-field select { width: 100%; padding: 9px 10px; border: 1px solid #ddd; border-radius: 6px; background: #fff; }
-    /* Заголовок блока ближе к линии и к полям */
-    .new-test-edit-page .settings-block .question-header { margin-bottom: 12px; padding-bottom: 6px; }
     .test-settings .access-display { padding: 9px 36px 9px 10px; }
-    .teacher-access { margin-top: 18px; }
+
+    /* Единый вид разделов редактора: карточка, заголовок, линия */
+    .editor-section {
+        background: #fff;
+        border: 1px solid #e1e8ed;
+        border-radius: 12px;
+        padding: 16px 20px 18px;
+        margin-bottom: 18px;
+    }
+    .editor-section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding-bottom: 8px;
+        margin-bottom: 14px;
+        border-bottom: 2px solid #e1e8ed;
+    }
+    .editor-section-header h3 { margin: 0; font-size: 18px; font-weight: 700; color: #2c3e50; }
+    .editor-section .settings-grid:last-child { margin-bottom: 0; }
+    .editor-section .field-hint:last-child { margin-bottom: 0; }
+    .section-intro { margin: -4px 0 14px; }
+    .section-badge {
+        min-width: 28px; padding: 2px 10px; border-radius: 999px;
+        background: #eaf2fb; color: #1f6aa5; font-weight: 700; font-size: 14px; text-align: center;
+    }
+    .editor-questions-section .question-block:last-child { margin-bottom: 0; }
+
+    /* Переключатель «Открыт / Закрыт для студентов» */
+    .switch-toggle { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; margin: 0; font-weight: 600; }
+    .switch-toggle input { display: none; }
+    .switch-slider {
+        position: relative; width: 44px; height: 24px; border-radius: 12px; background: #c0392b; transition: background .2s;
+    }
+    .switch-slider::after {
+        content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+        border-radius: 50%; background: #fff; transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.25);
+    }
+    .switch-toggle input:checked + .switch-slider { background: #27ae60; }
+    .switch-toggle input:checked + .switch-slider::after { transform: translateX(20px); }
+    .switch-label { font-size: 14px; color: #2c3e50; }
+    .students-access-body.is-disabled { opacity: .45; pointer-events: none; }
+    #students_access_hint.is-closed { color: #a93226; font-weight: 600; }
 </style>
 <style>
     .container .actions.editor-sticky-actions {
@@ -759,6 +824,37 @@ document.addEventListener('click', () => {
     });
 });
 
+// Доступ студентов: переключатель «Открыт / Закрыт» и подсказка о том, кто увидит тест
+const studentsOpen = document.getElementById('students_open');
+function updateStudentsAccessHint() {
+    const hint = document.getElementById('students_access_hint');
+    const body = document.querySelector('.students-access-body');
+    const label = document.getElementById('students_open_label');
+    const open = studentsOpen.checked;
+    label.textContent = open ? 'Открыт для студентов' : 'Закрыт для студентов';
+    body.classList.toggle('is-disabled', !open);
+    hint.classList.toggle('is-closed', !open);
+    if (!open) {
+        hint.textContent = 'Студенты не видят тест. Его видят только владелец и преподаватели, которым открыт доступ. Удобно, пока тест готовится.';
+    } else if (!getCheckedValues('.allowed-student-checkbox') && !getCheckedValues('.allowed-group-checkbox')) {
+        hint.textContent = 'Студенты и группы не выбраны — тест видят все студенты.';
+    } else {
+        hint.textContent = 'Тест видят только выбранные студенты и студенты выбранных групп.';
+    }
+}
+if (studentsOpen) {
+    studentsOpen.addEventListener('change', updateStudentsAccessHint);
+    document.querySelectorAll('.allowed-student-checkbox, .allowed-group-checkbox').forEach((c) => c.addEventListener('change', updateStudentsAccessHint));
+    updateStudentsAccessHint();
+}
+
+// Счётчик вопросов в заголовке раздела
+function updateQuestionsCount() {
+    const badge = document.getElementById('questions-count');
+    if (badge) badge.textContent = document.querySelectorAll('#questions-container .question-block').length;
+}
+new MutationObserver(updateQuestionsCount).observe(document.getElementById('questions-container'), {childList: true});
+
 // Выпадающие списки преподавателей устроены так же, как списки студентов и групп
 ['share_edit', 'share_results'].forEach((key) => {
     const display = document.getElementById(`${key}_display`);
@@ -842,6 +938,7 @@ mainForm.addEventListener('submit', function(e) {
     formData.append('max_attempts', document.getElementById('max_attempts').value.trim());
     formData.append('available_until', document.getElementById('available_until').value);
     formData.append('threshold', document.getElementById('threshold').value.trim());
+    formData.append('students_closed', document.getElementById('students_open').checked ? '0' : '1');
     if (document.getElementById('share_edit_list')) {
         const checkedLogins = (key) => new Set(Array.from(document.querySelectorAll(`.${key}-checkbox:checked`)).map((c) => c.value));
         const editLogins = checkedLogins('share_edit');
