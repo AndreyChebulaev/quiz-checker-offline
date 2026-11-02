@@ -1,0 +1,26 @@
+{# Ответ с решением системы. Для преподавателя — эталон, оценка и кнопки проверки.
+   Переменные: answer (из services.review), can_review (bool). #}
+<div class="verdict-row">
+    <span class="verdict-chip {{ answer.verdict }}" data-role="verdict">{{ answer.verdict_label }}</span>
+    {% if can_review %}
+    <span class="verdict-meta">сходство {{ answer.score_display }}</span>
+    <span class="verdict-meta" data-role="override-note">
+        {% if answer.is_overridden %}решение преподавателя{% if answer.reviewed_by %} ({{ answer.reviewed_by }}{% if answer.reviewed_at_display %}, {{ answer.reviewed_at_display }}{% endif %}){% endif %}; автоматически: {{ answer.auto_verdict_label|lower }}{% endif %}
+    </span>
+    {% endif %}
+</div>
+{% if answer.review_reason and (can_review or answer.verdict == "review") %}
+<div class="review-reason">{{ answer.review_reason }}</div>
+{% endif %}
+{% if can_review and answer.best_reference %}
+<div class="reference-box"><strong>Ближайший эталон:</strong> {{ answer.best_reference }}</div>
+{% endif %}
+{% if can_review %}
+<div class="review-actions" data-answer-id="{{ answer.answer_id }}">
+    <button type="button" class="accept" data-verdict="correct">✔ Засчитать</button>
+    <button type="button" class="reject" data-verdict="incorrect">✘ Не засчитать</button>
+    {% if answer.is_overridden %}
+    <button type="button" class="reset" data-verdict="auto">↺ Вернуть автоматическое</button>
+    {% endif %}
+</div>
+{% endif %}

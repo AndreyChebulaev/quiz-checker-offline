@@ -94,8 +94,9 @@ r = save(t, "Онтологии.xlsx", ["Что такое онтология?"]
 check("история результатов сохранилась после переименования", before == 1
       and _db("select count(*) from test_results where filename='Онтология.xlsx'") == [(1,)], (before, r.json()))
 check("попытки студента сохранились", _db("select count(*) from test_attempts where filename='Онтология.xlsx'") == [(1,)])
-r = save(t, "Онтология.xlsx", ["q"], [["a"]], source="published", test_name="Тест1")
-check("нельзя переименовать в имя другого теста", r.status_code == 409 or not os.path.exists("uploaded_files/Тест1.xlsx"), r.json())
+save(t, "new_file.xlsx", ["q"], [["a"]], test_name="Занятое имя")
+r = save(t, "Онтология.xlsx", ["q"], [["a"]], source="published", test_name="Занятое имя")
+check("нельзя переименовать в имя другого теста", r.status_code == 409 , r.json())
 r = save(t, "Онтология.xlsx", ["Что такое онтология?"], [["описание понятий"]], source="published", test_name="ОНТОЛОГИЯ",
          allowed_groups=first["student"][1] or "")
 check("смена регистра букв", r.status_code == 200 and os.path.exists("uploaded_files/ОНТОЛОГИЯ.xlsx")

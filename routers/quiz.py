@@ -10,6 +10,9 @@ from services.ai_backend import THRESHOLD, ai_service, ai_status, build_local_ai
 from services.formatting import format_datetime_ru, format_duration
 from services.quiz import get_active_quiz, get_quiz_restriction_status, get_unanswered_indexes
 from services.results import save_test_result
+from services.review import get_answer_results, save_answer_results
+from services.scoring import VERDICT_CORRECT, VERDICT_LABELS, VERDICT_REVIEW, evaluate_answer
+from services.test_settings import get_scoring_settings
 
 router = APIRouter()
 
@@ -179,48 +182,43 @@ def show_final_results(request: Request):
         elapsed_seconds = max(0, int((finished_at - started_at).total_seconds()))
     answers_for_scoring = list(quiz_state["user_answers"])
 
-    results = []
-    total_correct = 0
-    
-    for i, user_answer in enumerate(answers_for_scoring):
-        if not user_answer.strip() or all_embeddings[i] is None:
-            results.append({
-                "question": questions[i],
-                "user_answer": "",
-                "is_correct": False,
-                "score": "0.00",
-                "best_reference_answer": reference_answers[i][0] if reference_answers[i] else "",
-                "reference_answers": reference_answers[i],
-                "max_similarity": 0.0
-            })
-            continue
+    # Порог и «серая зона»: из настроек теста, иначе — значения для модели
+    scoring = get_scoring_settings(quiz_state.get("filename") or "")
+    threshold = scoring["threshold"] if scoring["threshold"] is not None else THRESHOLD
+    review_margin = scoring["review_margin"]
 
-        question_embeddings = all_embeddings[i]
-        max_similarity, best_reference_answer = ai_service.score_answer(
-            user_answer,
-            reference_answers[i],
-            question_embeddings
-        )
-        
-        is_correct = max_similarity >= THRESHOLD
-        if is_correct:
-            total_correct += 1
-        
+    # Оцениваем один раз; при повторном открытии страницы берём сохранённые оценки,
+    # чтобы не пересчитывать и не затирать решения преподавателя
+    evaluations = quiz_state.get("evaluations")
+    if evaluations is None:
+        evaluations = [
+            evaluate_answer(ai_service, answer, reference_answers[i], all_embeddings[i], threshold, review_margin)
+            for i, answer in enumerate(answers_for_scoring)
+        ]
+        quiz_state["evaluations"] = evaluations
+
+    results = []
+    for i, (answer, ev) in enumerate(zip(answers_for_scoring, evaluations)):
         results.append({
             "question": questions[i],
-            "user_answer": user_answer,
-            "is_correct": is_correct,
-            "score": f"{max_similarity:.2f}",
-            "best_reference_answer": best_reference_answer,
+            "user_answer": answer.strip(),
+            "verdict": ev.verdict,
+            "verdict_label": VERDICT_LABELS[ev.verdict],
+            "is_correct": ev.is_correct,
+            "review_reason": ev.reason,
+            "score": f"{ev.score:.2f}",
+            "best_reference_answer": ev.best_reference,
             "reference_answers": reference_answers[i],
-            "max_similarity": max_similarity
+            "max_similarity": max(0.0, min(1.0, ev.score)),
         })
-    
+
     total_questions = len(questions)
+    total_correct = sum(1 for ev in evaluations if ev.verdict == VERDICT_CORRECT)
+    pending_review = sum(1 for ev in evaluations if ev.verdict == VERDICT_REVIEW)
     percentage = (total_correct / total_questions) * 100 if total_questions > 0 else 0
 
     if not quiz_state.get("result_saved"):
-        save_test_result(
+        result_id = save_test_result(
             login=user,
             filename=quiz_state.get("filename"),
             attempt_number=int(quiz_state.get("attempt_number") or 0),
@@ -228,14 +226,29 @@ def show_final_results(request: Request):
             total_correct=total_correct,
             percentage=percentage,
             elapsed_seconds=elapsed_seconds,
-            threshold=THRESHOLD,
+            threshold=threshold,
             forced_finish=force_finish,
             started_at=started_at,
             finished_at=finished_at,
             user_answers_list=answers_for_scoring,
-            questions_list=questions
+            questions_list=questions,
+            pending_review=pending_review
         )
+        if result_id:
+            save_answer_results(result_id, questions, answers_for_scoring, evaluations)
+            quiz_state["result_id"] = result_id
         quiz_state["result_saved"] = True
+    elif quiz_state.get("result_id"):
+        # Преподаватель мог уже проверить ответы — показываем актуальные решения
+        reviewed = {item["index"] - 1: item for item in get_answer_results(quiz_state["result_id"])}
+        for i, item in enumerate(results):
+            if i in reviewed:
+                item["verdict"] = reviewed[i]["verdict"]
+                item["verdict_label"] = reviewed[i]["verdict_label"]
+                item["is_correct"] = item["verdict"] == VERDICT_CORRECT
+        total_correct = sum(1 for item in results if item["verdict"] == VERDICT_CORRECT)
+        pending_review = sum(1 for item in results if item["verdict"] == VERDICT_REVIEW)
+        percentage = (total_correct / total_questions) * 100 if total_questions > 0 else 0
 
     context = get_template_context(request)
     context.update({
@@ -244,7 +257,8 @@ def show_final_results(request: Request):
         "total_correct": total_correct,
         "total_questions": total_questions,
         "percentage": f"{percentage:.1f}",
-        "threshold": THRESHOLD,
+        "threshold": threshold,
+        "pending_review": pending_review,
         "restriction_message": restriction_status["error"] if force_finish else None,
         "completed_at_display": format_datetime_ru(finished_at),
         "elapsed_time_display": format_duration(elapsed_seconds)

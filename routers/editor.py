@@ -4,7 +4,7 @@ import os
 
 import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 from core.users_repo import get_user_full_info, get_user_permissions
 from core.web import get_user_from_session, templates
@@ -21,7 +21,9 @@ from services.test_files import (
 from services.test_settings import (
     build_access_context,
     get_test_settings_for_form,
+    parse_scoring_settings,
     rename_test_records,
+    set_scoring_settings,
     upsert_test_settings,
 )
 
@@ -33,7 +35,6 @@ async def home(request: Request):
     # Проверяем авторизацию
     user_login = get_user_from_session(request)
     if not user_login:
-        from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/", status_code=303)  # Redirect to main app login
     
     # Проверяем права доступа
@@ -41,10 +42,8 @@ async def home(request: Request):
     user_permissions = get_user_permissions(user_info['user_type'])
     
     if not user_permissions['can_edit_tests']:
-        from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/select", status_code=303)
     
-    from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/editor/create-new", status_code=303)
     
     return templates.TemplateResponse("upload.html", {
@@ -143,7 +142,6 @@ async def create_new(request: Request):
     # Проверяем авторизацию
     user_login = get_user_from_session(request)
     if not user_login:
-        from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/", status_code=303)  # Redirect to main app login
     
     # Проверяем права доступа
@@ -151,7 +149,6 @@ async def create_new(request: Request):
     user_permissions = get_user_permissions(user_info['user_type'])
     
     if not user_permissions['can_edit_tests']:
-        from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/select", status_code=303)
     
     test_settings = {
@@ -179,7 +176,6 @@ async def create_new(request: Request):
 async def edit(filename: str, request: Request):
     user_login = get_user_from_session(request)
     if not user_login:
-        from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/", status_code=303)
 
     # Проверяем права доступа
@@ -187,7 +183,6 @@ async def edit(filename: str, request: Request):
     user_permissions = get_user_permissions(user_info['user_type'])
     
     if not user_permissions['can_edit_tests']:
-        from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/select", status_code=303)
     
     # Путь к директории с файлами
@@ -195,7 +190,6 @@ async def edit(filename: str, request: Request):
     file_path = get_saved_file_path(safe_filename)
     
     if not file_path.exists():
-        from fastapi.responses import JSONResponse
         return JSONResponse(
             content={"error": f"Файл {filename} не найден на сервере"},
             status_code=404
@@ -229,8 +223,6 @@ async def edit(filename: str, request: Request):
             })
         
         # Рендерим шаблон
-        from fastapi.templating import Jinja2Templates
-        templates = Jinja2Templates(directory="templates")
         
         test_settings = get_test_settings_for_form(safe_filename)
         context = {
@@ -247,9 +239,8 @@ async def edit(filename: str, request: Request):
         return templates.TemplateResponse("edit.html", context)
         
     except Exception as e:
-        import traceback
         return JSONResponse(
-            content={"error": f"Ошибка чтения файла: {str(e)}\n{traceback.format_exc()}"},
+            content={"error": f"Ошибка чтения файла: {e}"},
             status_code=500
         )
 
@@ -266,7 +257,9 @@ async def save_edit(
     allowed_students: str = Form(""),
     allowed_groups: str = Form(""),
     test_name: str = Form(""),
-    source: str = Form("")
+    source: str = Form(""),
+    threshold: str = Form(""),
+    review_margin: str = Form("")
 ):
     user_login = get_user_from_session(request)
     if not user_login:
@@ -301,6 +294,11 @@ async def save_edit(
         
         data.append([question, answers_str])
     
+    try:
+        scoring_settings = parse_scoring_settings(threshold, review_margin)
+    except ValueError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+
     # Определяем, откуда открыт тест:
     #   new       — создаётся с нуля (служебное имя new_file.xlsx);
     #   import    — загружен из Excel в редактор, лежит в uploaded_files_imports;
@@ -353,6 +351,7 @@ async def save_edit(
         else:
             save_excel_file(str(file_path), data)
         upsert_test_settings(safe_filename, time_limit_minutes, max_attempts, available_until, allowed_students, allowed_groups)
+        set_scoring_settings(safe_filename, scoring_settings["threshold"], scoring_settings["review_margin"])
 
         # Возвращаем JSON ответ для асинхронного запроса
         return JSONResponse(

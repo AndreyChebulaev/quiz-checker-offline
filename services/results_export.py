@@ -122,6 +122,14 @@ def build_test_results_workbook(
     return workbook
 
 
+def answer_status_text(answer: Dict[str, Any]) -> str:
+    """Решение по ответу для выгрузки; для старых попыток без оценок — наличие ответа."""
+    if answer.get("verdict_label"):
+        suffix = " (решение преподавателя)" if answer.get("is_overridden") else ""
+        return f"{answer['verdict_label']}{suffix}"
+    return "Есть ответ" if answer.get("has_answer") else "Нет ответа"
+
+
 def build_test_result_detail_workbook(result_item: Dict[str, Any], show_user_meta: bool) -> Workbook:
     workbook = Workbook()
 
@@ -142,6 +150,7 @@ def build_test_result_detail_workbook(result_item: Dict[str, Any], show_user_met
         ("Тест", result_item.get("test_name", "")),
         ("Попытка", result_item.get("attempt_number", "")),
         ("Правильных ответов", result_item.get("total_correct", 0)),
+        ("На проверке у преподавателя", result_item.get("pending_review", 0)),
         ("Всего вопросов", result_item.get("total_questions", 0)),
         ("Процент", f"{result_item.get('percentage_display', '0.0')}%"),
         ("Статус", format_result_status_label(bool(result_item.get("forced_finish")))),
@@ -167,7 +176,7 @@ def build_test_result_detail_workbook(result_item: Dict[str, Any], show_user_met
 
     for row_index, answer in enumerate(result_item.get("answer_items", []), start=summary_headers_row + 1):
         answer_text = answer.get("user_answer") or "Нет ответа"
-        status_text = "Есть ответ" if answer.get("has_answer") else "Нет ответа"
+        status_text = answer_status_text(answer)
 
         summary_sheet.cell(row=row_index, column=1, value=answer.get("index", row_index - summary_headers_row))
         summary_sheet.cell(row=row_index, column=2, value=answer.get("question", ""))
@@ -192,7 +201,7 @@ def build_test_result_detail_workbook(result_item: Dict[str, Any], show_user_met
         answers_sheet.cell(
             row=row_index,
             column=4,
-            value="Есть ответ" if answer.get("has_answer") else "Нет ответа"
+            value=answer_status_text(answer)
         )
 
     summary_sheet.freeze_panes = "A2"

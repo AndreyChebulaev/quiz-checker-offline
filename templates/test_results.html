@@ -398,6 +398,9 @@
                             {% else %}
                             <span class="status-chip normal">Обычное</span>
                             {% endif %}
+                            {% if item.pending_review %}
+                            <span class="status-chip" style="background:#fdebd0;color:#a04000;margin-top:4px;">⏳ На проверке: {{ item.pending_review }}</span>
+                            {% endif %}
                         </td>
                         <td class="cell-details">
                             <a href="/results/{{ item.id }}" class="btn btn-secondary btn-open-details">Открыть</a>

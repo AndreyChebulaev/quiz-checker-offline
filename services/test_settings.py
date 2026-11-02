@@ -196,7 +196,8 @@ def get_test_settings_for_form(filename: str):
         "available_until": available_until,
         "allowed_students": allowed_students,
         "allowed_groups": allowed_groups,
-        "max_attempts": max_attempts
+        "max_attempts": max_attempts,
+        **{key: ("" if value is None else f"{value:g}") for key, value in get_scoring_settings(filename).items()},
     }
 
 
@@ -323,6 +324,51 @@ def rename_test_records(old_filename: str, new_filename: str) -> None:
         cursor.execute("UPDATE test_settings SET filename = ? WHERE filename = ?", (new_filename, old_filename))
         cursor.execute("UPDATE test_attempts SET filename = ? WHERE filename = ?", (new_filename, old_filename))
         cursor.execute("UPDATE test_results SET filename = ? WHERE filename = ?", (new_filename, old_filename))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _parse_unit_interval(value: Optional[str], field: str, upper: float = 1.0) -> Optional[float]:
+    text = (value or "").strip().replace(",", ".")
+    if not text:
+        return None
+    try:
+        number = float(text)
+    except ValueError:
+        raise ValueError(f"{field}: введите число, например 0.71")
+    if not 0 <= number <= upper:
+        raise ValueError(f"{field}: допустимо значение от 0 до {upper}")
+    return number
+
+
+def parse_scoring_settings(threshold: Optional[str], review_margin: Optional[str]) -> Dict[str, Optional[float]]:
+    """Проверяет поля формы. Пустое поле — значение по умолчанию (None)."""
+    return {
+        "threshold": _parse_unit_interval(threshold, "Порог сходства"),
+        "review_margin": _parse_unit_interval(review_margin, "Ширина зоны проверки", upper=0.5),
+    }
+
+
+def get_scoring_settings(filename: str) -> Dict[str, Optional[float]]:
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        row = conn.execute(
+            "SELECT threshold, review_margin FROM test_settings WHERE filename = ?", (filename,)
+        ).fetchone()
+    finally:
+        conn.close()
+    return {"threshold": row[0] if row else None, "review_margin": row[1] if row else None}
+
+
+def set_scoring_settings(filename: str, threshold: Optional[float], review_margin: Optional[float]) -> None:
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        conn.execute("INSERT OR IGNORE INTO test_settings (filename) VALUES (?)", (filename,))
+        conn.execute(
+            "UPDATE test_settings SET threshold = ?, review_margin = ?, updated_at = CURRENT_TIMESTAMP WHERE filename = ?",
+            (threshold, review_margin, filename),
+        )
         conn.commit()
     finally:
         conn.close()

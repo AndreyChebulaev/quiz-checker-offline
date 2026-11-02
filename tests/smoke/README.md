@@ -9,4 +9,4 @@ PYTHONHASHSEED=0 PYTHONPATH=tests/smoke/stubs python tests/smoke/smoke.py .
 ```
 
 Скрипты: `smoke.py` — основной сценарий, `smoke_parallel.py` — два студента одновременно,
-`smoke_security.py` — права и пароли, `smoke_editor.py` — редактор тестов.
+`smoke_security.py` — права и пароли, `smoke_editor.py` — редактор тестов, `smoke_review.py` — ручная проверка и порог теста.

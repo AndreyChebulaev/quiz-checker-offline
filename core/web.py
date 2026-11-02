@@ -4,15 +4,19 @@ from typing import Optional
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
 
-from config import TEMPLATES_DIR
+from config import REVIEW_MARGIN, TEMPLATES_DIR
 from core.sessions import get_user_from_session as get_session_user
 from core.users_repo import get_user_full_info, get_user_permissions
-from services.ai_backend import ai_service, ai_status, build_local_ai_help_text
+from services.ai_backend import THRESHOLD, ai_service, ai_status, build_local_ai_help_text
+from services.review import count_pending_reviews
 
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 # Отключаем кэш шаблонов для совместимости с Jinja2 3.1.6+ и Starlette
 templates.env.cache_size = 0
 templates.env.auto_reload = False
+# Значения по умолчанию для подсказок в форме настроек теста
+templates.env.globals["default_threshold"] = THRESHOLD
+templates.env.globals["default_review_margin"] = REVIEW_MARGIN
 
 
 def get_session_token(request: Request) -> Optional[str]:
@@ -41,6 +45,7 @@ def get_template_context(request: Request):
         return {
             "user_info": user_info,
             "user_permissions": user_permissions,
+            "pending_review_count": count_pending_reviews() if user_permissions.get("can_edit_tests") else 0,
             "ai_ready": ai_service is not None and ai_service.is_ready(),
             "ai_model_source": ai_service.model_source if ai_service is not None else None,
             "ai_help_text": build_local_ai_help_text(ai_service.status() if ai_service is not None else ai_status)

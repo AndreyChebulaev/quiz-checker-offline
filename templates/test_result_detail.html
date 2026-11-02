@@ -140,6 +140,25 @@
             box-shadow: none !important;
         }
     }
+
+    .answer-item.verdict-correct { border-left-color: #27ae60; }
+    .answer-item.verdict-incorrect { border-left-color: #e74c3c; }
+    .answer-item.verdict-review { border-left-color: #f39c12; background: #fffaf0; }
+    .verdict-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 0.45rem; }
+    .verdict-chip { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.8rem; font-weight: 600; }
+    .verdict-chip.correct { background: #d5f5e3; color: #1e8449; }
+    .verdict-chip.incorrect { background: #fadbd8; color: #b03a2e; }
+    .verdict-chip.review { background: #fdebd0; color: #a04000; }
+    .verdict-meta { color: #6b7785; font-size: 0.8rem; }
+    .reference-box { margin-top: 0.5rem; padding: 0.5rem 0.65rem; background: #f4f7fa; border-radius: 8px; font-size: 0.9rem; }
+    .review-reason { margin-top: 0.4rem; color: #7e5109; font-size: 0.88rem; }
+    .review-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 0.6rem; }
+    .review-actions button { padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.85rem; color: #fff; }
+    .review-actions .accept { background: #27ae60; }
+    .review-actions .reject { background: #e74c3c; }
+    .review-actions .reset { background: #95a5a6; }
+    .review-actions button:disabled { opacity: 0.6; cursor: wait; }
+    @media print { .review-actions { display: none; } }
 </style>
 
 <div class="detail-summary">
@@ -148,8 +167,11 @@
             <h2>Детали результата</h2>
             <p>
                 Тест: <strong>{{ result_item.test_name }}</strong>, попытка <strong>{{ result_item.attempt_number }}</strong>.
-                Результат: <strong>{{ result_item.total_correct }} / {{ result_item.total_questions }}</strong> ({{ result_item.percentage_display }}%).
+                Результат: <strong id="result-total">{{ result_item.total_correct }} / {{ result_item.total_questions }}</strong> (<span id="result-percentage">{{ result_item.percentage_display }}</span>%).
             </p>
+            {% if result_item.pending_review %}
+            <p id="pending-note" style="color:#a04000;">⏳ Ответов на проверке: <strong id="pending-count">{{ result_item.pending_review }}</strong>{% if not show_user_meta %}. Результат может измениться после проверки преподавателем.{% endif %}</p>
+            {% endif %}
         </div>
 
         <div class="detail-toolbar">
@@ -193,7 +215,7 @@
 
 <div class="answers-list">
     {% for answer in result_item.answer_items %}
-    <article class="answer-item">
+    <article class="answer-item {% if answer.verdict %}verdict-{{ answer.verdict }}{% endif %}" data-answer-card>
         <h3>Вопрос {{ answer.index }}: {{ answer.question }}</h3>
         <div class="answer-label">Ответ пользователя</div>
         {% if answer.has_answer %}
@@ -201,9 +223,24 @@
         {% else %}
         <div class="answer-value empty">Нет ответа</div>
         {% endif %}
+        {% if answer.verdict %}
+        <div style="margin-top: 0.55rem;">
+        {% with can_review = show_user_meta %}{% include "_review_answer.html" %}{% endwith %}
+        </div>
+        {% endif %}
     </article>
     {% endfor %}
 </div>
+
+{% if show_user_meta and result_item.has_scores %}
+{% include "_review_script.html" %}
+<script>
+function onVerdictSaved(article, data) {
+    // Перерисовываем ответ и итог попытки без перезагрузки
+    location.reload();
+}
+</script>
+{% endif %}
 
 <div class="detail-actions">
     <a href="/results" class="btn btn-primary">Назад к результатам</a>

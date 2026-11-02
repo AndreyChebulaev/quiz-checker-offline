@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Проверка ответов{% endblock %}
+{% block container_class %}review-page{% endblock %}
+
+{% block content %}
+<style>
+    .container.review-page { max-width: 980px; margin: 1.5rem auto; }
+    .review-intro { color: #54606c; margin-bottom: 1rem; }
+    .review-filter { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+    .review-filter select { padding: 8px 10px; border-radius: 6px; border: 1px solid #ccd6e0; }
+    .answer-item { border: 1px solid #dce3ea; border-left: 5px solid #f39c12; border-radius: 10px; background: #fff;
+                   padding: 0.85rem 1rem; margin-bottom: 0.85rem; transition: opacity .3s; }
+    .answer-item.done { opacity: 0.45; }
+    .answer-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; color: #54606c; font-size: 0.85rem; margin-bottom: 0.35rem; }
+    .answer-item h3 { margin: 0 0 0.45rem; font-size: 0.98rem; color: #2c3e50; }
+    .answer-label { color: #556371; font-size: 0.84rem; margin: 0.4rem 0 0.15rem; }
+    .answer-value { color: #1f2d3a; white-space: pre-wrap; }
+    .empty-state { text-align: center; padding: 2.5rem 1rem; color: #54606c; }
+
+    .answer-item.verdict-correct { border-left-color: #27ae60; }
+    .answer-item.verdict-incorrect { border-left-color: #e74c3c; }
+    .answer-item.verdict-review { border-left-color: #f39c12; background: #fffaf0; }
+    .verdict-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 0.45rem; }
+    .verdict-chip { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.8rem; font-weight: 600; }
+    .verdict-chip.correct { background: #d5f5e3; color: #1e8449; }
+    .verdict-chip.incorrect { background: #fadbd8; color: #b03a2e; }
+    .verdict-chip.review { background: #fdebd0; color: #a04000; }
+    .verdict-meta { color: #6b7785; font-size: 0.8rem; }
+    .reference-box { margin-top: 0.5rem; padding: 0.5rem 0.65rem; background: #f4f7fa; border-radius: 8px; font-size: 0.9rem; }
+    .review-reason { margin-top: 0.4rem; color: #7e5109; font-size: 0.88rem; }
+    .review-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 0.6rem; }
+    .review-actions button { padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.85rem; color: #fff; }
+    .review-actions .accept { background: #27ae60; }
+    .review-actions .reject { background: #e74c3c; }
+    .review-actions .reset { background: #95a5a6; }
+    .review-actions button:disabled { opacity: 0.6; cursor: wait; }
+    @media print { .review-actions { display: none; } }
+
+</style>
+
+<h2>Проверка ответов</h2>
+<p class="review-intro">
+    Здесь ответы, которые система не стала решать сама: оценка близка к порогу
+    или ответ отличается от эталона отрицанием. Решите, засчитывать ли их, —
+    результат студента пересчитается сразу.
+</p>
+
+{% if tests %}
+<form class="review-filter" method="get" action="/review">
+    <label for="test">Тест:</label>
+    <select id="test" name="test" onchange="this.form.submit()">
+        <option value="">Все тесты</option>
+        {% for file in test_files %}
+        <option value="{{ file }}" {% if file == test_filter %}selected{% endif %}>{{ file.rsplit('.', 1)[0] }}</option>
+        {% endfor %}
+    </select>
+    <span id="left-count">Осталось: {{ items|length }}</span>
+</form>
+{% endif %}
+
+{% for answer in items %}
+<article class="answer-item" data-answer-card>
+    <div class="answer-head">
+        <span><strong>{{ answer.full_name }}</strong>{% if answer.group_name %} • {{ answer.group_name }}{% endif %}</span>
+        <span>{{ answer.test_name }}, попытка {{ answer.attempt_number }} • {{ answer.finished_at_display }}
+            • <a href="/results/{{ answer.result_id }}">вся попытка</a></span>
+    </div>
+    <h3>Вопрос {{ answer.index }}: {{ answer.question }}</h3>
+    <div class="answer-label">Ответ студента</div>
+    <div class="answer-value">{{ answer.user_answer }}</div>
+    {% with can_review = true %}{% include "_review_answer.html" %}{% endwith %}
+</article>
+{% else %}
+<div class="empty-state">
+    <p style="font-size: 2rem;">✅</p>
+    <p>Нет ответов, ожидающих проверки.</p>
+</div>
+{% endfor %}
+
+{% include "_review_script.html" %}
+<script>
+function onVerdictSaved(article, data) {
+    article.classList.add('done');
+    article.querySelector('.review-actions').innerHTML =
+        `<span class="verdict-chip ${data.verdict}">${data.verdict_label}</span>
+         <span class="verdict-meta">итог студента: ${data.total_correct} / ${data.total_questions} (${data.percentage_display}%)</span>`;
+    const left = document.querySelectorAll('[data-answer-card]:not(.done)').length;
+    const counter = document.getElementById('left-count');
+    if (counter) counter.textContent = `Осталось: ${left}`;
+}
+</script>
+{% endblock %}

@@ -71,6 +71,28 @@
         background: #fff3f3;
         border-left-color: #e74c3c;
     }
+    .result-item.review {
+        background: #fff9ec;
+        border-left-color: #f39c12;
+    }
+    .verdict-chip {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 999px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        margin-bottom: 0.45rem;
+    }
+    .verdict-chip.correct { background: #d5f5e3; color: #1e8449; }
+    .verdict-chip.incorrect { background: #fadbd8; color: #b03a2e; }
+    .verdict-chip.review { background: #fdebd0; color: #a04000; }
+    .pending-note {
+        margin-top: 0.75rem;
+        padding: 0.6rem 0.8rem;
+        border-radius: 8px;
+        background: #fdebd0;
+        color: #7e5109;
+    }
 
     .result-item h3 {
         margin: 0 0 0.6rem;
@@ -115,6 +137,13 @@
 <div class="results-summary">
     <h2>Результаты теста</h2>
     <p>Верных ответов: <strong>{{ total_correct }}</strong> из <strong>{{ total_questions }}</strong> ({{ percentage }}%)</p>
+    {% if pending_review %}
+    <p class="pending-note">
+        ⏳ Ответов на проверке у преподавателя: <strong>{{ pending_review }}</strong>.
+        Результат предварительный — он может вырасти после проверки.
+        Итог появится в разделе «Результаты».
+    </p>
+    {% endif %}
 
     <div class="result-meta">
         <div class="result-meta-card">
@@ -134,10 +163,14 @@
 
 <div class="results-list">
     {% for result in results %}
-    <article class="result-item {% if result.is_correct %}correct{% else %}incorrect{% endif %}">
+    <article class="result-item {{ result.verdict }}">
+        <span class="verdict-chip {{ result.verdict }}">{{ result.verdict_label }}</span>
         <h3>Вопрос: {{ result.question }}</h3>
         <p><strong>Ваш ответ:</strong> {{ result.user_answer }}</p>
-        <p><strong>Сходство:</strong> {{ result.score }}</p>
+        <p><strong>Сходство с эталоном:</strong> {{ result.score }}</p>
+        {% if result.verdict == "review" and result.review_reason %}
+        <p style="color:#7e5109;"><em>{{ result.review_reason }}</em></p>
+        {% endif %}
         <div class="similarity-bar">
             <div class="similarity-progress" style="width: {{ result.max_similarity * 100 }}%"></div>
         </div>

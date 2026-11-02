@@ -17,6 +17,7 @@ from services.formatting import (
     parse_json_list,
 )
 from services.results_search import apply_ai_result_search, normalize_search_text
+from services.review import get_answer_results
 
 
 def save_test_result(
@@ -32,10 +33,12 @@ def save_test_result(
     started_at: Optional[datetime],
     finished_at: datetime,
     user_answers_list: Optional[List[str]] = None,
-    questions_list: Optional[List[str]] = None
-) -> None:
+    questions_list: Optional[List[str]] = None,
+    pending_review: int = 0
+) -> Optional[int]:
+    """Сохраняет итог попытки и возвращает id записи в test_results."""
     if not login or not filename or attempt_number <= 0:
-        return
+        return None
 
     safe_user_answers = [str(answer) if answer is not None else "" for answer in (user_answers_list or [])]
     safe_questions = [str(question) if question is not None else "" for question in (questions_list or [])]
@@ -47,9 +50,9 @@ def save_test_result(
         INSERT INTO test_results (
             login, filename, attempt_number, total_questions, total_correct, percentage,
             elapsed_seconds, threshold, forced_finish, started_at, finished_at,
-            user_answers_json, questions_json
+            user_answers_json, questions_json, pending_review
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(login, filename, attempt_number) DO UPDATE SET
             total_questions = excluded.total_questions,
             total_correct = excluded.total_correct,
@@ -60,7 +63,8 @@ def save_test_result(
             started_at = excluded.started_at,
             finished_at = excluded.finished_at,
             user_answers_json = excluded.user_answers_json,
-            questions_json = excluded.questions_json
+            questions_json = excluded.questions_json,
+            pending_review = excluded.pending_review
         ''',
         (
             login,
@@ -75,11 +79,17 @@ def save_test_result(
             format_datetime_db(started_at),
             format_datetime_db(finished_at),
             json.dumps(safe_user_answers, ensure_ascii=False),
-            json.dumps(safe_questions, ensure_ascii=False)
+            json.dumps(safe_questions, ensure_ascii=False),
+            int(pending_review)
         )
     )
+    result_id = cursor.execute(
+        "SELECT id FROM test_results WHERE login = ? AND filename = ? AND attempt_number = ?",
+        (login, filename, attempt_number)
+    ).fetchone()[0]
     conn.commit()
     conn.close()
+    return int(result_id)
 
 
 def get_results_filters_from_request(request: Request) -> Dict[str, str]:
@@ -186,7 +196,8 @@ def get_test_results_for_view(
                 r.percentage,
                 r.elapsed_seconds,
                 r.forced_finish,
-                r.finished_at
+                r.finished_at,
+                r.pending_review
             FROM test_results r
             LEFT JOIN users u ON u.login = r.login
         '''
@@ -247,7 +258,8 @@ def get_test_results_for_view(
             percentage,
             elapsed_seconds,
             forced_finish,
-            finished_at
+            finished_at,
+            pending_review
         ) = row
 
         full_name = f"{(last_name or '').strip()} {(first_name or '').strip()}".strip()
@@ -276,6 +288,7 @@ def get_test_results_for_view(
             "percentage_display": f"{percentage_value:.1f}",
             "elapsed_time_display": format_duration(elapsed_seconds),
             "forced_finish": bool(forced_finish),
+            "pending_review": int(pending_review or 0),
             "finished_at_display": format_datetime_ru(finished_at_dt) if finished_at_dt else (finished_at or "—")
         })
 
@@ -383,6 +396,12 @@ def get_test_result_detail_for_view(user_info: Optional[Dict[str, Any]], result_
             "has_answer": bool(answer_text.strip())
         })
 
+    # Для попыток, сохранённых после появления проверки, есть оценка каждого ответа
+    scored_items = get_answer_results(int(db_result_id))
+    if scored_items:
+        answer_items = scored_items
+    pending_review = sum(1 for item in scored_items if item["verdict"] == "review")
+
     finished_at_dt = parse_datetime_db(finished_at)
     started_at_dt = parse_datetime_db(started_at)
     try:
@@ -405,5 +424,7 @@ def get_test_result_detail_for_view(user_info: Optional[Dict[str, Any]], result_
         "forced_finish": bool(forced_finish),
         "started_at_display": format_datetime_ru(started_at_dt) if started_at_dt else "—",
         "finished_at_display": format_datetime_ru(finished_at_dt) if finished_at_dt else (finished_at or "—"),
-        "answer_items": answer_items
+        "answer_items": answer_items,
+        "has_scores": bool(scored_items),
+        "pending_review": pending_review
     }

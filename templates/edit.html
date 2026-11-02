@@ -311,6 +311,34 @@
             >
         </div>
         <div class="form-group">
+            <label for="threshold">Порог сходства для зачёта ответа (0–1):</label>
+            <input
+                type="number"
+                id="threshold"
+                min="0"
+                max="1"
+                step="0.01"
+                value="{{ test_settings.threshold if test_settings else '' }}"
+                placeholder="По умолчанию {{ '%.2f'|format(default_threshold) }} — подобран экспериментально"
+                style="padding: 12px;"
+            >
+            <small>Выше порог — строже проверка. Оставьте пустым, чтобы использовать значение для модели.</small>
+        </div>
+        <div class="form-group">
+            <label for="review_margin">Ширина зоны ручной проверки:</label>
+            <input
+                type="number"
+                id="review_margin"
+                min="0"
+                max="0.5"
+                step="0.01"
+                value="{{ test_settings.review_margin if test_settings else '' }}"
+                placeholder="По умолчанию {{ '%.2f'|format(default_review_margin) }}; 0 — без ручной проверки"
+                style="padding: 12px;"
+            >
+            <small>Ответы с оценкой от «порог − ширина» до порога уходят преподавателю на проверку.</small>
+        </div>
+        <div class="form-group">
             <label>Доступ для студентов:</label>
             <div class="access-dropdown">
                 <input type="text" id="allowed_students_display" class="access-display" placeholder="Выберите студентов" readonly>
@@ -721,6 +749,8 @@ mainForm.addEventListener('submit', function(e) {
     formData.append('time_limit_minutes', document.getElementById('time_limit_minutes').value.trim());
     formData.append('max_attempts', document.getElementById('max_attempts').value.trim());
     formData.append('available_until', document.getElementById('available_until').value);
+    formData.append('threshold', document.getElementById('threshold').value.trim());
+    formData.append('review_margin', document.getElementById('review_margin').value.trim());
     formData.append('allowed_students', getCheckedValues('.allowed-student-checkbox'));
     formData.append('allowed_groups', getCheckedValues('.allowed-group-checkbox'));
 

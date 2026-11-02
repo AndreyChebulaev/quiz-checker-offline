@@ -1,0 +1,25 @@
+<script>
+// Решение преподавателя по ответу: отправляется без перезагрузки страницы
+document.addEventListener('click', async (event) => {
+    const button = event.target.closest('.review-actions button');
+    if (!button) return;
+    const box = button.closest('.review-actions');
+    const article = button.closest('[data-answer-card]');
+    box.querySelectorAll('button').forEach((b) => (b.disabled = true));
+    const body = new FormData();
+    body.append('verdict', button.dataset.verdict);
+    try {
+        const response = await fetch(`/review/answers/${box.dataset.answerId}`, {method: 'POST', body});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Не удалось сохранить решение');
+        if (typeof onVerdictSaved === 'function') {
+            onVerdictSaved(article, data);
+        } else {
+            location.reload();
+        }
+    } catch (error) {
+        alert(error.message);
+        box.querySelectorAll('button').forEach((b) => (b.disabled = false));
+    }
+});
+</script>
