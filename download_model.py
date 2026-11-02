@@ -1,29 +1,34 @@
 """Однократная загрузка ML-модели для офлайн-работы.
 
 Запускается один раз при наличии интернета:
-    python download_model.py
+    python download_model.py            # основная модель (config.MODEL_NAME)
+    python download_model.py --all      # плюс запасная модель
 
-После этого приложение работает без интернета: модель берётся
-из папки local_models/paraphrase-multilingual-MiniLM-L12-v2.
+После этого приложение работает без интернета: модели берутся из local_models/.
 """
+import sys
 from pathlib import Path
 
 from sentence_transformers import SentenceTransformer
 
-MODEL_ID = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-TARGET_DIR = Path(__file__).parent / "local_models" / "paraphrase-multilingual-MiniLM-L12-v2"
+from config import FALLBACK_MODEL_NAME, MODEL_HF_IDS, MODEL_NAME, MODELS_DIR
+
+ROOT = Path(__file__).resolve().parent
 
 
-def main() -> None:
-    if (TARGET_DIR / "model.safetensors").exists():
-        print(f"Модель уже загружена: {TARGET_DIR}")
+def download(name: str) -> None:
+    target = ROOT / MODELS_DIR / name
+    if (target / "model.safetensors").exists():
+        print(f"Уже загружена: {target}")
         return
-    print(f"Загрузка {MODEL_ID} ...")
-    model = SentenceTransformer(MODEL_ID)
-    TARGET_DIR.mkdir(parents=True, exist_ok=True)
-    model.save(str(TARGET_DIR))
-    print(f"Готово: {TARGET_DIR}")
+    print(f"Загрузка {MODEL_HF_IDS[name]} ...")
+    model = SentenceTransformer(MODEL_HF_IDS[name])
+    target.mkdir(parents=True, exist_ok=True)
+    model.save(str(target))
+    print(f"Готово: {target}")
 
 
 if __name__ == "__main__":
-    main()
+    download(MODEL_NAME)
+    if "--all" in sys.argv:
+        download(FALLBACK_MODEL_NAME)

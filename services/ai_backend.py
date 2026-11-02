@@ -4,14 +4,29 @@ from typing import Any, List, Optional, Sequence, Tuple
 
 from sentence_transformers import SentenceTransformer, util
 
+from config import (
+    DEFAULT_THRESHOLD,
+    FALLBACK_MODEL_NAME,
+    MODEL_NAME,
+    MODEL_THRESHOLDS,
+    MODELS_DIR,
+    THRESHOLD_OVERRIDE,
+)
+
+# Модели берутся только с диска: приложение должно работать без интернета
 DEFAULT_MODEL_CANDIDATES = [
     os.getenv("LOCAL_EMBEDDING_MODEL_PATH", "").strip(),
-    os.getenv("LOCAL_AI_MODEL_PATH", "").strip(),
-    os.path.join("local_models", "paraphrase-multilingual-MiniLM-L12-v2"),
-    os.path.join("models", "paraphrase-multilingual-MiniLM-L12-v2"),
-    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-    "sentence-transformers/all-MiniLM-L6-v2",
+    os.path.join(MODELS_DIR, MODEL_NAME),
+    os.path.join(MODELS_DIR, FALLBACK_MODEL_NAME),
 ]
+
+
+def threshold_for(model_source: Optional[str]) -> float:
+    """Порог для загруженной модели: ручной из окружения или подобранный в эксперименте."""
+    if THRESHOLD_OVERRIDE:
+        return float(THRESHOLD_OVERRIDE)
+    name = os.path.basename(os.path.normpath(model_source or ""))
+    return MODEL_THRESHOLDS.get(name, DEFAULT_THRESHOLD)
 
 
 @dataclass
@@ -111,9 +126,9 @@ def build_local_ai_help_text(status: LocalAIStatus) -> str:
         return f"Локальная AI-модель подключена: {status.model_source}"
 
     return (
-        "Локальная AI-модель не найдена. Положите готовую модель SentenceTransformer "
-        "в папку `local_models/paraphrase-multilingual-MiniLM-L12-v2` "
-        "или укажите путь в `LOCAL_EMBEDDING_MODEL_PATH`."
+        "Локальная AI-модель не найдена. Выполните один раз при наличии интернета "
+        f"`python download_model.py` (модель сохранится в `{MODELS_DIR}/{MODEL_NAME}`) "
+        "или укажите путь к модели в переменной окружения `LOCAL_EMBEDDING_MODEL_PATH`."
     )
 
 
@@ -125,3 +140,6 @@ except Exception:
     # Модель не загрузилась — приложение работает, а пользователю показывается подсказка
     ai_service = None
     ai_status = None
+
+# Порог для фактически загруженной модели
+THRESHOLD: float = threshold_for(ai_service.model_source if ai_service else None)

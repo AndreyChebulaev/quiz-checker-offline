@@ -4,10 +4,9 @@ from datetime import datetime
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from config import THRESHOLD
 from core.web import get_template_context, get_user_from_session, templates
 from routers.common import render_select_with_error
-from services.ai_backend import ai_service, ai_status, build_local_ai_help_text
+from services.ai_backend import THRESHOLD, ai_service, ai_status, build_local_ai_help_text
 from services.formatting import format_datetime_ru, format_duration
 from services.quiz import get_active_quiz, get_quiz_restriction_status, get_unanswered_indexes
 from services.results import save_test_result
