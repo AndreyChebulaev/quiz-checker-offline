@@ -34,8 +34,10 @@ def test_rename_and_case_change(client_for):
     name = create_test(teacher, "редактор регистр", Q)
     response = save_test(teacher, name, Q, source="published", test_name="Редактор Регистр")
     assert response.status_code == 200
-    assert os.path.exists("uploaded_files/Редактор Регистр.xlsx")
-    assert not os.path.exists("uploaded_files/редактор регистр.xlsx")
+    # os.path.exists в Windows не различает регистр — сверяем точные имена файлов в папке
+    names = os.listdir("uploaded_files")
+    assert "Редактор Регистр.xlsx" in names
+    assert "редактор регистр.xlsx" not in names
 
 
 def test_student_cannot_use_editor(client_for):
