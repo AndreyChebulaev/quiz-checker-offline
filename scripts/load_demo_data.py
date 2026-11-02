@@ -1,11 +1,16 @@
 """Демонстрационные данные для защиты: преподаватели, студенты, тест и попытки.
 
-Рекомендуется отдельная демо-база, чтобы не смешивать её с рабочей:
+Данные создаются в отдельной демо-базе, чтобы не смешивать их с рабочей.
+PowerShell (терминал VS Code):
 
-    set QUIZ_DATABASE_PATH=demo.db
-    set QUIZ_UPLOAD_DIR=demo_files
+    $env:QUIZ_DATABASE_PATH = "demo.db"
+    $env:QUIZ_UPLOAD_DIR = "demo_files"
     python scripts\\load_demo_data.py
     python -m uvicorn main:app
+
+Командная строка (cmd): то же, но `set QUIZ_DATABASE_PATH=demo.db` и `set QUIZ_UPLOAD_DIR=demo_files`.
+
+    python scripts\\load_demo_data.py --remove   # удалить демо-данные из текущей базы
 
 Скрипт можно запускать повторно: существующие пользователи и попытки не дублируются.
 Логины и пароли сохраняются в demo_credentials.txt (файл исключён из git).
@@ -25,7 +30,16 @@ os.chdir(ROOT)
 sys.path.insert(0, str(ROOT))
 
 DEMO_PASSWORDS = {"admin": "demo-admin-2026", "teacher": "demo-teacher-2026", "student": "demo-student-2026"}
-os.environ.setdefault("QUIZ_ADMIN_PASSWORD", DEMO_PASSWORDS["admin"])
+# Защита от случайной записи демо-данных в рабочую базу
+if os.getenv("QUIZ_DATABASE_PATH", "users.db") == "users.db" and "--allow-main-db" not in sys.argv \
+        and "--remove" not in sys.argv:
+    print("Демо-данные создаются в отдельной базе. Перед запуском укажите её:\n"
+          "  PowerShell:  $env:QUIZ_DATABASE_PATH = \"demo.db\"; $env:QUIZ_UPLOAD_DIR = \"demo_files\"\n"
+          "  cmd:         set QUIZ_DATABASE_PATH=demo.db  и  set QUIZ_UPLOAD_DIR=demo_files\n"
+          "Записать в рабочую базу users.db всё равно: добавьте --allow-main-db")
+    sys.exit(1)
+if "--remove" not in sys.argv:
+    os.environ.setdefault("QUIZ_ADMIN_PASSWORD", DEMO_PASSWORDS["admin"])
 
 import main  # noqa: E402,F401  — создаёт таблицы и первого администратора
 from config import DATABASE_PATH, UPLOAD_DIR  # noqa: E402
@@ -67,6 +81,23 @@ def ensure_user(conn, user_type, login, last, first, middle, group, created):
     )
     created.append((user_type, login))
     return True
+
+
+def remove_demo():
+    """Удаляет демо-пользователей, демо-тест и всё, что с ними связано, из текущей базы."""
+    demo_logins = [login for login, *_ in TEACHERS] + [login for login, *_ in STUDENTS]
+    marks = ",".join("?" * len(demo_logins))
+    with sqlite3.connect(DATABASE_PATH) as conn:
+        conn.execute(f"DELETE FROM answer_results WHERE result_id IN (SELECT id FROM test_results "
+                     f"WHERE filename = ? OR login IN ({marks}))", (TEST_FILE, *demo_logins))
+        conn.execute(f"DELETE FROM test_results WHERE filename = ? OR login IN ({marks})", (TEST_FILE, *demo_logins))
+        conn.execute(f"DELETE FROM test_attempts WHERE filename = ? OR login IN ({marks})", (TEST_FILE, *demo_logins))
+        conn.execute(f"DELETE FROM test_shares WHERE filename = ? OR teacher_login IN ({marks})", (TEST_FILE, *demo_logins))
+        conn.execute("DELETE FROM test_settings WHERE filename = ?", (TEST_FILE,))
+        conn.execute(f"DELETE FROM sessions WHERE login IN ({marks})", demo_logins)
+        removed = conn.execute(f"DELETE FROM users WHERE login IN ({marks})", demo_logins).rowcount
+    (Path(UPLOAD_DIR) / TEST_FILE).unlink(missing_ok=True)
+    print(f"Удалено демо-пользователей: {removed}; демо-тест и его результаты удалены из {DATABASE_PATH}")
 
 
 def main_demo():
@@ -145,4 +176,7 @@ def main_demo():
 
 
 if __name__ == "__main__":
-    main_demo()
+    if "--remove" in sys.argv:
+        remove_demo()
+    else:
+        main_demo()
