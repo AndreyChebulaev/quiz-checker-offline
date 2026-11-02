@@ -400,18 +400,59 @@
         {% endfor %}
     </div>
 
-    <div class="actions">
+    <!-- Панель действий закреплена внизу экрана: сохранить можно, не прокручивая до конца теста -->
+    <div class="actions editor-sticky-actions">
+        <span class="editor-save-status" id="save-status" aria-live="polite"></span>
         <button type="button" onclick="addQuestion()">
             Добавить вопрос
         </button>
-        <button type="submit" style="background: linear-gradient(135deg, #27ae60, #219a52);">
+        <button type="button" onclick="window.scrollTo({top: 0, behavior: 'smooth'})"
+                style="background: linear-gradient(135deg, #95a5a6, #7f8c8d);" title="К названию и настройкам теста">
+            ↑ Наверх
+        </button>
+        <button type="submit" id="save-button" style="background: linear-gradient(135deg, #27ae60, #219a52);"
+                title="Сохранить (Ctrl+S)">
             Сохранить изменения
         </button>
         <button type="button" onclick="location.href='/select'" style="background: linear-gradient(135deg, #7f8c8d, #6c7a89);">
-            Вернуться к списку тестов
+            К списку тестов
         </button>
     </div>
 </form>
+
+<style>
+    .container .actions.editor-sticky-actions {
+        position: sticky;
+        bottom: 0;
+        z-index: 50;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 10px;
+        margin: 20px -2rem -2rem;
+        padding: 12px 2rem;
+        background: rgba(255, 255, 255, 0.97);
+        border-top: 1px solid #e1e8ed;
+        box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+        border-radius: 0 0 8px 8px;
+    }
+    .container .actions.editor-sticky-actions button { margin: 0; width: auto; padding: 10px 16px; }
+    .editor-save-status { margin-right: auto; font-size: 14px; color: #7f8c8d; }
+    .editor-save-status.is-dirty { color: #e67e22; font-weight: 600; }
+    @media (max-width: 700px) {
+        .container .actions.editor-sticky-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin: 20px -20px -20px;
+            padding: 8px 10px;
+        }
+        .container .actions.editor-sticky-actions button { width: 100%; padding: 8px 6px; font-size: 13px; }
+        .editor-save-status { grid-column: 1 / -1; font-size: 12px; }
+        .editor-save-status:empty { display: none; }
+    }
+</style>
 
 <script>
 let questionCount = {{ questions | length }};
@@ -616,8 +657,56 @@ document.addEventListener('click', () => {
     });
 });
 
-document.getElementById('main-form').addEventListener('submit', function(e) {
+// --- Несохранённые изменения и Ctrl+S ---
+const mainForm = document.getElementById('main-form');
+const saveStatus = document.getElementById('save-status');
+let hasUnsavedChanges = false;
+
+function markDirty() {
+    if (hasUnsavedChanges) return;
+    hasUnsavedChanges = true;
+    saveStatus.textContent = '● Есть несохранённые изменения';
+    saveStatus.classList.add('is-dirty');
+}
+mainForm.addEventListener('input', markDirty);
+mainForm.addEventListener('change', markDirty);
+// добавление и удаление вопросов/ответов тоже изменение
+new MutationObserver(markDirty).observe(document.getElementById('questions-container'), {childList: true, subtree: true});
+
+// «Добавить вопрос» нажимается из закреплённой панели, поэтому показываем новый вопрос
+const addQuestionOriginal = addQuestion;
+addQuestion = function () {
+    addQuestionOriginal();
+    const blocks = document.querySelectorAll('#questions-container .question-block');
+    const last = blocks[blocks.length - 1];
+    if (last) {
+        last.scrollIntoView({behavior: 'smooth', block: 'center'});
+        const input = last.querySelector('input[name="questions"]');
+        if (input) input.focus({preventScroll: true});
+    }
+};
+
+// Ctrl+S (Cmd+S на Mac) — сохранить, где бы ни находился курсор
+document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'ы' || e.code === 'KeyS')) {
+        e.preventDefault();
+        mainForm.requestSubmit();
+    }
+});
+
+// Предупреждение при уходе со страницы с несохранёнными правками
+window.addEventListener('beforeunload', (e) => {
+    if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+    }
+});
+
+mainForm.addEventListener('submit', function(e) {
     e.preventDefault();
+    const saveButton = document.getElementById('save-button');
+    saveButton.disabled = true;
+    saveStatus.textContent = 'Сохранение…';
 
     const questionBlocks = document.querySelectorAll('.question-block');
 
@@ -653,13 +742,18 @@ document.getElementById('main-form').addEventListener('submit', function(e) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
+            hasUnsavedChanges = false;
             alert(data.message);
             window.location.href = '/select';
         } else {
+            saveButton.disabled = false;
+            saveStatus.textContent = hasUnsavedChanges ? '● Есть несохранённые изменения' : '';
             alert('Ошибка: ' + data.error);
         }
     })
     .catch(error => {
+        saveButton.disabled = false;
+        saveStatus.textContent = hasUnsavedChanges ? '● Есть несохранённые изменения' : '';
         alert('Ошибка при сохранении: ' + error.message);
     });
 });
