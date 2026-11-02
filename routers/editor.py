@@ -372,7 +372,10 @@ async def save_edit(
     )
     target_exists = get_saved_file_path(safe_filename).exists()
     # Повторный импорт под тем же именем обновляет тест — только если это свой (или открытый) тест
-    if target_exists and (not same_as_original or not can_edit_test(user_info, safe_filename)):
+    # При смене только регистра букв в Windows «новый» файл — это тот же самый тест:
+    # права проверяем по исходному имени, под которым тест записан в базе
+    if target_exists and (not same_as_original
+                          or not can_edit_test(user_info, original_filename if source == "published" else safe_filename)):
         return JSONResponse(
             content={"error": f"Тест «{safe_filename}» уже существует. Выберите другое название."},
             status_code=409

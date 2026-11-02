@@ -44,3 +44,23 @@ def test_student_cannot_use_editor(client_for):
 
 def test_path_traversal_rejected(client_for):
     assert client_for("teacher1").get("/download/..%2Fusers.db").status_code in (400, 404)
+
+
+def test_case_only_rename_on_case_insensitive_fs(client_for, monkeypatch, db):
+    """В Windows «тест.xlsx» и «Тест.xlsx» — один файл. Эмулируем такую файловую систему."""
+    from pathlib import Path
+
+    import routers.editor as editor
+
+    def case_insensitive_path(name):
+        for existing in os.listdir("uploaded_files"):
+            if existing.casefold() == name.casefold():
+                return Path("uploaded_files") / existing
+        return Path("uploaded_files") / name
+
+    teacher = client_for("teacher1")
+    name = create_test(teacher, "редактор windows", Q)
+    monkeypatch.setattr(editor, "get_saved_file_path", case_insensitive_path)
+    response = save_test(teacher, name, Q, source="published", test_name="Редактор Windows")
+    assert response.status_code == 200, response.json()
+    assert db("SELECT owner_login FROM test_settings WHERE filename = 'Редактор Windows.xlsx'") == [("teacher1",)]
