@@ -1,0 +1,4 @@
+# Для эксперимента (experiments/run_experiment.py) и тестов
+-r requirements.txt
+scikit-learn==1.8.0
+matplotlib>=3.8
